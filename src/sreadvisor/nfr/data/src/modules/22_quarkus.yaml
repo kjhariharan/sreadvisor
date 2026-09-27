@@ -1,0 +1,99 @@
+id: quarkus
+title: Quarkus
+layer: tech_stack
+category: framework
+description: Requirements specific to Quarkus services (JVM and native mode, SmallRye, RESTEasy Reactive, Agroal, Hibernate ORM).
+extends: [baseline, lang_java]
+detect:
+  - framework: Quarkus
+recognizes:
+  - dependency: "io\\.smallrye|org\\.eclipse\\.microprofile|io\\.vertx|agroal"
+catalogue_refs: [oneagent_default, application_level]
+entry_extensions:
+  quarkus_property: "the application.properties key the requirement is expressed through"
+entries:
+  - id: QK-001
+    title: SmallRye Health with liveness, readiness and startup checks
+    extends: BASE-HC-001
+    quarkus_property: quarkus-smallrye-health (/q/health/live, /q/health/ready, /q/health/started)
+    requirement: The quarkus-smallrye-health extension is present and the Kubernetes probes use the live, ready and started endpoints.
+    best_practice: Keep liveness dependency-free; add readiness checks only for critical dependencies; use the started check for slow start-up.
+    audit_requirement: null
+    priority: high
+    monitoring:
+      - source: platform
+        signal: "probe results and restarts"
+    verification:
+      sources: [stage1_dataset]
+      stage1_paths:
+        - "repositories[].fingerprint.dependencies[].name"
+        - "infrastructure.workloads[].containers[].liveness"
+        - "infrastructure.workloads[].containers[].readiness"
+      criteria: quarkus-smallrye-health is a dependency and probes point at /q/health paths.
+  - id: QK-002
+    title: Datasource pool and HTTP limits explicit
+    extends: BASE-MON-002
+    quarkus_property: quarkus.datasource.jdbc.max-size, quarkus.http.limits.max-connections
+    requirement: Agroal pool sizes and acquisition timeout, event-loop and worker thread counts, and HTTP limits are set explicitly.
+    best_practice: Size the pool from the database budget; keep blocking work off the event loop (use @Blocking or Mutiny offloading); set request body limits.
+    audit_requirement: null
+    priority: high
+    monitoring:
+      - source: library_emitted
+        signal: "agroal pool gauges and vertx pool metrics"
+    verification:
+      sources: [stage1_dataset]
+      stage1_paths:
+        - "repositories[].application_capacity[].category"
+        - "repositories[].application_capacity[].key"
+        - "repositories[].application_capacity[].origin"
+      criteria: db_pool and thread_pool settings are explicit.
+  - id: QK-003
+    title: Fault tolerance annotations on remote calls
+    extends: BASE-CB-001
+    quarkus_property: quarkus-smallrye-fault-tolerance (@Timeout, @Retry, @CircuitBreaker, @Fallback, @Bulkhead)
+    requirement: Remote calls (REST client, messaging, database access to external systems) use MicroProfile Fault Tolerance annotations with explicit values, including timeouts on the REST client.
+    best_practice: Set quarkus.rest-client connect and read timeouts; combine @Retry with jitter and a max duration; expose fault tolerance metrics.
+    audit_requirement: null
+    priority: high
+    monitoring:
+      - source: library_emitted
+        signal: "ft.invocations.total, ft.circuitbreaker.state.current and ft.retry.calls.total"
+    verification:
+      sources: [stage1_dataset]
+      stage1_paths:
+        - "repositories[].reliability_patterns[].pattern"
+        - "repositories[].reliability_patterns[].mechanism"
+        - "repositories[].dependency_classification[].protecting_patterns"
+      criteria: Each remote dependency has a fault tolerance pattern.
+  - id: QK-004
+    title: Graceful shutdown and start-up profile discipline
+    extends: BASE-SHUT-001
+    quarkus_property: quarkus.shutdown.timeout, %prod profile
+    requirement: A shutdown timeout is set for graceful draining, and production profile configuration disables Dev Services and dev-only endpoints.
+    best_practice: Set quarkus.shutdown.timeout below the termination grace period; keep production settings in the %prod profile or injected environment; ensure OpenAPI and Swagger UI exposure is intentional.
+    audit_requirement: null
+    priority: medium
+    monitoring:
+      - source: platform
+        signal: "errors during rollouts"
+    verification:
+      sources: [stage1_dataset, manual_review]
+      stage1_paths:
+        - "infrastructure.workloads[].termination_grace_period_seconds"
+      criteria: quarkus.shutdown.timeout is set and less than the grace period.
+  - id: QK-005
+    title: Native-image versus JVM mode decision and memory sizing
+    requirement: The runtime mode (JVM or native) is a deliberate decision, and memory requests and limits reflect it (native images need far less heap but different peak behaviour).
+    best_practice: Load test the chosen mode; for JVM mode apply the Java heap sizing requirement; for native mode set explicit memory limits and watch RSS.
+    audit_requirement: null
+    priority: low
+    monitoring:
+      - source: oneagent_default
+        signal: "process memory and start-up time"
+    verification:
+      sources: [stage1_dataset, manual_review]
+      stage1_paths:
+        - "infrastructure.workloads[].containers[].limits"
+        - "infrastructure.dockerfiles[].base_images"
+      criteria: Memory limits match the runtime mode used by the image.

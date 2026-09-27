@@ -1,0 +1,10 @@
+description: >-
+  Master NFR List: a structured knowledge base of non-functional requirements, not an analysis component.
+  Layer one is a generic baseline that applies to every service. Layer two is a set of tech-stack modules that
+  extend the baseline. Cross-cutting modules apply to every service and are evaluated against the Stage 1
+  dataset (each entry lists the dataset paths and the pass criteria). Stage 3 loads this file and evaluates
+  the applicable modules; this file itself judges nothing.
+layers:
+  baseline: Generic requirements that hold regardless of tech stack.
+  tech_stack: Modules that extend the baseline for one technology. Applied only when the Stage 1 fingerprint detects it.
+  cross_cutting: Modules that apply to every service and are evaluated against Stage 1 infrastructure, pipeline, dependency, secrets and encryption data.

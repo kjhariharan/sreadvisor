@@ -1,0 +1,96 @@
+id: service_mesh
+title: Service mesh
+layer: tech_stack
+category: integration
+description: Requirements for services running in a service mesh (Istio, Linkerd or equivalent).
+extends: [baseline]
+detect:
+  - infra: service_mesh
+recognizes:
+  - infra: [service_mesh, mtls, mesh_authorization]
+catalogue_refs: [oneagent_default, application_level]
+entries:
+  - id: MESH-001
+    title: Strict mTLS between meshed services
+    extends: ENC-002
+    requirement: mTLS is enforced in strict mode for the service's namespace or the whole mesh, not left permissive.
+    best_practice: Use a mesh-wide PeerAuthentication STRICT (Istio) or default Linkerd mTLS; migrate through permissive mode with a deadline; monitor plaintext traffic.
+    audit_requirement: mTLS policy is version controlled.
+    priority: critical
+    monitoring:
+      - source: platform
+        signal: "percentage of meshed traffic using mTLS"
+    verification:
+      sources: [stage1_dataset]
+      stage1_paths:
+        - "infrastructure.mesh.mtls[].mode"
+        - "infrastructure.mesh.mtls[].scope"
+        - "infrastructure.mesh.present"
+        - "infrastructure.mesh.injection"
+      criteria: mtls mode is strict for the service scope; permissive or missing is a finding.
+  - id: MESH-002
+    title: Retry and timeout policy owned by the mesh without duplication
+    extends: BASE-RETRY-001
+    requirement: Retries and timeouts for each service call are defined at the mesh layer or the application, not multiplied across both, with bounded attempts and per-try timeouts.
+    best_practice: Use VirtualService retries with retryOn limited to safe conditions; set overall timeout above per-try timeout times attempts; document ownership.
+    audit_requirement: null
+    priority: high
+    monitoring:
+      - source: platform
+        signal: "proxy upstream retry counts and timeouts"
+    verification:
+      sources: [stage1_dataset]
+      stage1_paths:
+        - "infrastructure.mesh.traffic_policies[].kind"
+        - "infrastructure.mesh.traffic_policies[].host"
+        - "infrastructure.mesh.traffic_policies[].settings"
+        - "repositories[].reliability_patterns[].pattern"
+        - "cross_references[].kind"
+      criteria: Each dependency has retry and timeout at exactly one layer (resilience_by_layer cross reference).
+  - id: MESH-003
+    title: Circuit breaking and outlier detection for upstreams
+    extends: BASE-CB-001
+    requirement: Destination rules define connection pool limits and outlier detection (ejection after consecutive errors) for critical upstreams.
+    best_practice: Tune maxConnections and pending requests from load tests; set base ejection time and max ejection percent to avoid ejecting the whole pool.
+    audit_requirement: null
+    priority: medium
+    monitoring:
+      - source: platform
+        signal: "outlier ejections and overflow counters"
+    verification:
+      sources: [stage1_dataset]
+      stage1_paths:
+        - "infrastructure.mesh.traffic_policies[].kind"
+        - "infrastructure.mesh.traffic_policies[].settings"
+      criteria: circuit_breaker and connection_pool policies exist for hard_failure dependencies.
+  - id: MESH-004
+    title: Default-deny authorisation policy
+    extends: ZT-002
+    requirement: Authorisation policies deny by default and allow specific service identities, methods and paths.
+    best_practice: Start with a namespace-wide deny-all AuthorizationPolicy and add allows per caller; audit policy hits.
+    audit_requirement: Policy changes are reviewed.
+    priority: high
+    monitoring:
+      - source: platform
+        signal: "denied requests by policy"
+    verification:
+      sources: [stage1_dataset]
+      stage1_paths:
+        - "infrastructure.mesh.authorization_policies"
+      criteria: Authorization policies exist for the service.
+  - id: MESH-005
+    title: Sidecar and control plane resilience
+    extends: CAP-001
+    requirement: Sidecar proxies have resource requests and limits and start before the application; the control plane is highly available and upgraded in a controlled way, and data plane traffic continues if it is unavailable.
+    best_practice: Use holdApplicationUntilProxyStarts; run multiple control plane replicas; canary control plane upgrades.
+    audit_requirement: null
+    priority: medium
+    monitoring:
+      - source: platform
+        signal: "control plane health and proxy sync status"
+    verification:
+      sources: [stage1_dataset]
+      stage1_paths:
+        - "infrastructure.workloads[].mesh_injection"
+        - "infrastructure.workloads[].containers[].limits"
+      criteria: Injection is enabled and sidecar resources are bounded.

@@ -1,0 +1,101 @@
+id: lang_java
+title: Java
+layer: tech_stack
+category: language
+description: JVM runtime requirements for services written in Java (and other JVM languages built with Maven or Gradle).
+extends: [baseline]
+detect:
+  - language: Java
+recognizes:
+  - language: Kotlin
+  - dependency: "caffeine|ehcache|resilience4j|hystrix|failsafe|micrometer|dropwizard"
+catalogue_refs: [oneagent_default, application_level]
+entry_extensions:
+  jvm_flag: "the JVM option or system property the requirement is expressed through, where there is one"
+entries:
+  - id: LJAVA-001
+    title: Container-aware heap sizing
+    extends: BASE-MON-002
+    requirement: The JVM heap is sized relative to the container memory limit (for example a percentage of container memory), with explicit headroom for metaspace, thread stacks, direct buffers and code cache.
+    best_practice: Use -XX:MaxRAMPercentage (commonly 60 to 75 percent) or explicit -Xmx below the limit; set -XX:+ExitOnOutOfMemoryError so the platform restarts a failed JVM; do not let heap plus non-heap exceed the container limit.
+    audit_requirement: null
+    jvm_flag: -XX:MaxRAMPercentage / -Xmx
+    priority: high
+    monitoring:
+      - source: oneagent_default
+        signal: "JVM memory pool usage and container memory working set"
+      - source: library_emitted
+        signal: "jvm.memory.used and jvm.memory.max"
+        detail: "Micrometer or OpenTelemetry JVM metrics"
+    verification:
+      sources: [stage1_dataset, manual_review]
+      stage1_paths:
+        - "infrastructure.workloads[].containers[].limits"
+        - "infrastructure.workloads[].containers[].requests"
+        - "repositories[].fingerprint.runtime_versions"
+        - "infrastructure.dockerfiles[].base_images"
+      criteria: Container memory limits are set, and the start command or JAVA_TOOL_OPTIONS sets heap relative to them.
+  - id: LJAVA-002
+    title: Supported long-term-support Java version
+    requirement: The service targets a Java version that still receives security updates (a current LTS release).
+    best_practice: Track the LTS cadence; keep base images patched; avoid running end-of-life major versions in production.
+    audit_requirement: Runtime versions are inventoried for vulnerability management.
+    priority: medium
+    monitoring:
+      - source: oneagent_default
+        signal: "JVM version reported per process"
+    verification:
+      sources: [stage1_dataset]
+      stage1_paths:
+        - "repositories[].fingerprint.runtime_versions"
+        - "repositories[].fingerprint.languages"
+      criteria: runtime_versions.java is a currently supported LTS release.
+  - id: LJAVA-003
+    title: Garbage collector chosen and GC health monitored
+    requirement: The garbage collector is chosen deliberately for the workload (latency versus throughput) and GC pause time and frequency are monitored against a budget.
+    best_practice: G1 as a general default; consider ZGC or Shenandoah for strict latency; enable GC logging; alert on sustained pause time and allocation-rate growth.
+    audit_requirement: null
+    jvm_flag: -XX:+UseG1GC / -XX:+UseZGC
+    priority: medium
+    monitoring:
+      - source: oneagent_default
+        signal: "GC collection time, count and suspension time"
+      - source: library_emitted
+        signal: "jvm.gc.pause and jvm.gc.memory.allocated"
+    verification:
+      sources: [runtime_telemetry, manual_review]
+      criteria: GC pause percentiles stay within the latency budget under load.
+  - id: LJAVA-004
+    title: Bounded executors and no unbounded thread creation
+    extends: BASE-MON-002
+    requirement: Application code uses bounded thread pools with bounded queues and a rejection policy, and blocking work does not run on request or event-loop threads.
+    best_practice: Avoid Executors.newCachedThreadPool and unbounded queues; name pools; for virtual threads, still bound concurrency towards downstream systems.
+    audit_requirement: null
+    priority: high
+    monitoring:
+      - source: oneagent_default
+        signal: "JVM thread count"
+      - source: library_emitted
+        signal: "executor active, queued and completed counts"
+    verification:
+      sources: [stage1_dataset, manual_review]
+      stage1_paths:
+        - "repositories[].application_capacity[].category"
+        - "repositories[].application_capacity[].key"
+      criteria: thread_pool capacity settings are explicit and bounded.
+  - id: LJAVA-005
+    title: Dependency vulnerability scanning in the build
+    requirement: Third-party dependencies are scanned for known vulnerabilities on every build, with a defined remediation time by severity, and dependency versions are managed through a BOM or dependency management section.
+    best_practice: Use software composition analysis in CI; generate an SBOM; update through automated pull requests.
+    audit_requirement: Scan results and exceptions are retained per release.
+    priority: medium
+    monitoring:
+      - source: platform
+        signal: "open vulnerabilities by severity and age"
+    verification:
+      sources: [stage1_dataset, manual_review]
+      stage1_paths:
+        - "repositories[].fingerprint.dependencies[].version"
+        - "repositories[].fingerprint.build_tools"
+        - "infrastructure.pipelines[].deploy_steps"
+      criteria: A dependency scan step exists in the pipeline; dependency versions are resolved.

@@ -1,0 +1,91 @@
+id: lang_python
+title: Python
+layer: tech_stack
+category: language
+description: Runtime requirements for Python services (web frameworks such as Django, Flask and FastAPI are covered here).
+extends: [baseline]
+detect:
+  - language: Python
+recognizes:
+  - framework: [Django, Flask, FastAPI]
+  - dependency: "celery|kombu|sqlalchemy|alembic|tenacity|backoff|prometheus[-_]client|:requests$|httpx|aiohttp"
+catalogue_refs: [oneagent_default, application_level]
+entries:
+  - id: LPY-001
+    title: Supported Python version
+    requirement: The service runs on a Python version that still receives security fixes.
+    best_practice: Track upstream support windows; test on the target version in CI; keep the base image patched.
+    audit_requirement: Runtime versions are inventoried for vulnerability management.
+    priority: medium
+    monitoring:
+      - source: oneagent_default
+        signal: "Python version reported per process"
+    verification:
+      sources: [stage1_dataset]
+      stage1_paths:
+        - "repositories[].fingerprint.runtime_versions"
+        - "repositories[].fingerprint.manifests"
+      criteria: The declared Python version is within upstream security support.
+  - id: LPY-002
+    title: Production application server with explicit worker configuration
+    requirement: The service runs under a production WSGI or ASGI server (for example gunicorn or uvicorn) with explicit worker count, worker class, timeout and graceful timeout, never the framework's development server.
+    best_practice: Size workers to the container CPU limit; set request timeouts; recycle workers (max requests with jitter) to bound memory growth; preload carefully.
+    audit_requirement: null
+    priority: high
+    monitoring:
+      - source: oneagent_default
+        signal: "process CPU and memory per worker process"
+      - source: library_emitted
+        signal: "worker busy and queue metrics"
+        detail: "from the server's own statsd or Prometheus support"
+    verification:
+      sources: [manual_review, stage1_dataset]
+      stage1_paths:
+        - "repositories[].fingerprint.dependencies[].name"
+        - "infrastructure.dockerfiles[].file"
+      criteria: An application server package is a dependency and the container entrypoint starts it with explicit worker settings.
+  - id: LPY-003
+    title: Explicit timeouts on HTTP and database clients
+    extends: BASE-TO-001
+    requirement: Every outbound call passes a timeout; the requests library has no default timeout, and database drivers and pools have explicit connect and statement timeouts.
+    best_practice: Wrap clients in a shared session with a default timeout tuple (connect, read); use retries via urllib3 Retry or tenacity with bounded attempts.
+    audit_requirement: null
+    priority: critical
+    monitoring:
+      - source: oneagent_default
+        signal: "outbound request response time and failure rate"
+    verification:
+      sources: [stage1_dataset, manual_review]
+      stage1_paths:
+        - "repositories[].reliability_patterns[].pattern"
+        - "repositories[].fingerprint.dependencies[].categories"
+      criteria: Each outbound HTTP or database call in the flows has a timeout pattern.
+  - id: LPY-004
+    title: Blocking calls kept out of the event loop
+    requirement: In async services, blocking I/O or CPU-heavy work runs in a thread or process pool rather than on the event loop.
+    best_practice: Use async drivers or run_in_executor; monitor event loop lag; keep synchronous and asynchronous endpoints separate.
+    audit_requirement: null
+    priority: medium
+    monitoring:
+      - source: custom_instrumentation
+        signal: "event loop lag"
+      - source: oneagent_default
+        signal: "service response time percentiles"
+    verification:
+      sources: [manual_review]
+      criteria: Async handlers contain no blocking calls (review of the flow map's steps).
+  - id: LPY-005
+    title: Reproducible, pinned dependencies
+    requirement: Dependencies are pinned in a lock file (ideally with hashes) and installed from it in the build.
+    best_practice: Use a lock file tool (pip-tools, Poetry, uv); scan the lock file for vulnerabilities; build wheels in a multi-stage image.
+    audit_requirement: SBOM retained per release.
+    priority: medium
+    monitoring:
+      - source: platform
+        signal: "vulnerable dependency count"
+    verification:
+      sources: [stage1_dataset]
+      stage1_paths:
+        - "repositories[].fingerprint.manifests"
+        - "repositories[].fingerprint.dependencies[].version"
+      criteria: A lock or pinned requirements file exists and dependency versions are exact.

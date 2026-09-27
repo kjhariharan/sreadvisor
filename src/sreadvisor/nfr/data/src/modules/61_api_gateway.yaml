@@ -1,0 +1,89 @@
+id: api_gateway
+title: API gateways
+layer: tech_stack
+category: integration
+description: Requirements for the API gateway layer (Apigee, Kong, Spring Cloud Gateway, cloud API gateways, ingress gateways acting as API gateways).
+extends: [baseline]
+detect:
+  - dependency: "spring-cloud-starter-gateway|spring-cloud-gateway|zuul|kong|apisix|tyk"
+  - terraform: "apigee|api_gateway|apigateway|endpoints"
+  - image: "kong|apisix|tyk|envoyproxy|traefik"
+recognizes: []
+catalogue_refs: [oneagent_default, application_level]
+entries:
+  - id: GW-001
+    title: Centralised authentication and coarse authorisation at the edge
+    requirement: The gateway authenticates callers (validating tokens or API keys) and enforces coarse authorisation, while backends still enforce fine-grained authorisation.
+    best_practice: Validate JWTs at the gateway with cached keys; strip and re-issue identity headers; never trust client-set identity headers.
+    audit_requirement: Authentication decisions are logged at the gateway.
+    priority: high
+    monitoring:
+      - source: platform
+        signal: "gateway 401 and 403 rate by consumer"
+    verification:
+      sources: [manual_review]
+      criteria: Gateway policy validates tokens and backends re-check authorisation.
+  - id: GW-002
+    title: Rate limits, quotas, size limits and timeouts at the edge
+    extends: CAP-007
+    requirement: The gateway enforces per-consumer rate limits and quotas, maximum request and response sizes, and upstream timeouts.
+    best_practice: Differentiate limits by consumer tier; fail with 429 and Retry-After; set gateway timeouts above backend timeouts by a small margin.
+    audit_requirement: null
+    priority: high
+    monitoring:
+      - source: platform
+        signal: "throttled requests and upstream timeout counts"
+    verification:
+      sources: [stage1_dataset, manual_review]
+      stage1_paths:
+        - "infrastructure.terraform_resources[].attributes"
+        - "infrastructure.mesh.traffic_policies[].kind"
+      criteria: Rate limiting and timeout policies are present in gateway configuration.
+  - id: GW-003
+    title: Gateway retries and circuit breaking are safe
+    extends: BASE-RETRY-001
+    requirement: The gateway retries only idempotent requests, with bounded attempts, and uses upstream health checks or circuit breaking so failed backends are ejected quickly; retries are not duplicated by the backend or mesh.
+    best_practice: Decide one layer to own retries; use outlier detection; configure retry budgets.
+    audit_requirement: null
+    priority: high
+    monitoring:
+      - source: platform
+        signal: "upstream retry and ejection counts"
+    verification:
+      sources: [manual_review, stage1_dataset]
+      stage1_paths:
+        - "infrastructure.mesh.traffic_policies[].kind"
+        - "repositories[].reliability_patterns[].pattern"
+      criteria: Retry ownership across gateway, mesh and application is documented and non-duplicating.
+  - id: GW-004
+    title: Gateway is highly available and scales
+    extends: CAP-003
+    requirement: The gateway runs redundantly across zones with autoscaling, and its configuration is deployed as code with staged rollout.
+    best_practice: Treat the gateway as a critical hard dependency for all callers; test failover; keep configuration in version control.
+    audit_requirement: Gateway configuration changes are versioned and attributable.
+    priority: high
+    monitoring:
+      - source: platform
+        signal: "gateway availability, latency and saturation"
+      - source: oneagent_default
+        signal: "gateway process availability where OneAgent monitors it"
+    verification:
+      sources: [stage1_dataset]
+      stage1_paths:
+        - "infrastructure.workloads[].replicas"
+        - "infrastructure.autoscalers[].min_replicas"
+        - "infrastructure.terraform_resources[].type"
+      criteria: Gateway workloads have at least two replicas and autoscaling, or a managed HA gateway is used.
+  - id: GW-005
+    title: TLS termination, WAF and access logging
+    extends: ENC-003
+    requirement: The gateway terminates TLS with modern policy, applies web application firewall protections where required, and writes access logs with correlation ids.
+    best_practice: Use managed certificates; enable OWASP rule sets in detection then blocking mode; ship access logs centrally.
+    audit_requirement: Gateway access logs retained per policy.
+    priority: high
+    monitoring:
+      - source: logs
+        signal: "gateway access logs and blocked request events"
+    verification:
+      sources: [manual_review]
+      criteria: TLS policy, WAF and access logs are configured.

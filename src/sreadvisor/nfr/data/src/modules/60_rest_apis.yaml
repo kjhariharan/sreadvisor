@@ -1,0 +1,103 @@
+id: rest_apis
+title: REST APIs
+layer: tech_stack
+category: integration
+description: Requirements for HTTP/REST interfaces the service exposes (and, where relevant, the way it calls others).
+extends: [baseline]
+detect:
+  - entry_point: rest
+recognizes:
+  - dependency: "okhttp|httpclient|httpcomponents|feign|retrofit|:axios$|node-fetch|:got$|:requests$|httpx|aiohttp|jersey-client|rest-client|refit"
+catalogue_refs: [oneagent_default, application_level]
+entries:
+  - id: REST-001
+    title: Consistent error model and correct status codes
+    requirement: Errors are returned with correct HTTP status codes and a consistent machine-readable body (for example RFC 9457 problem details), with no stack traces or internal details.
+    best_practice: Map domain errors to 4xx and infrastructure failures to 5xx; include a correlation id; never leak exception messages.
+    audit_requirement: null
+    priority: medium
+    monitoring:
+      - source: oneagent_default
+        signal: "HTTP 4xx and 5xx response rate by request"
+    verification:
+      sources: [stage1_dataset, manual_review]
+      stage1_paths:
+        - "repositories[].entry_points[].route"
+        - "repositories[].entry_points[].http_method"
+      criteria: Error handling is centralised and returns problem-style bodies.
+  - id: REST-002
+    title: Input validation and request size limits
+    requirement: Every entry point validates input (types, ranges, required fields) and enforces limits on request body size, pagination page size and query complexity.
+    best_practice: Use declarative validation; cap page sizes; reject oversized bodies at the gateway or server.
+    audit_requirement: Rejected malformed requests are counted and reviewed for abuse patterns.
+    priority: high
+    monitoring:
+      - source: oneagent_default
+        signal: "400 and 413 response rate"
+    verification:
+      sources: [manual_review, stage1_dataset]
+      stage1_paths:
+        - "repositories[].entry_points[].route"
+        - "repositories[].entry_points[].annotation"
+      criteria: Validation annotations or schemas exist for write endpoints and list endpoints are paginated.
+  - id: REST-003
+    title: Idempotent methods and idempotency keys for creation
+    extends: BASE-RETRY-002
+    requirement: GET, PUT and DELETE are idempotent, and POST endpoints that create resources or trigger payments accept an idempotency key.
+    best_practice: Store the key with the result for a TTL and return the stored result on repeat; never mutate on GET.
+    audit_requirement: Idempotency keys recorded with financial writes.
+    priority: medium
+    monitoring:
+      - source: custom_instrumentation
+        signal: "idempotent replays served"
+    verification:
+      sources: [stage1_dataset, manual_review]
+      stage1_paths:
+        - "repositories[].entry_points[].http_method"
+        - "repositories[].entry_points[].route"
+        - "repositories[].transaction_flows[].steps[].action"
+      criteria: GET entry points show no writes in the flow steps; creation endpoints handle repeated submissions.
+  - id: REST-004
+    title: Published, versioned contract with compatibility tests
+    requirement: The API has a published contract (OpenAPI), a versioning scheme, and consumer or contract tests that fail the build on breaking changes.
+    best_practice: Generate the contract from code or code from the contract; deprecate with Sunset headers and telemetry on usage.
+    audit_requirement: Contract change history retained.
+    priority: medium
+    monitoring:
+      - source: custom_instrumentation
+        signal: "requests per API version"
+    verification:
+      sources: [manual_review]
+      criteria: An OpenAPI document exists and contract tests run in CI.
+  - id: REST-005
+    title: Rate limiting, timeouts and safe caching headers
+    extends: CAP-007
+    requirement: Public endpoints have rate limits and request timeouts, and responses set caching headers (Cache-Control, ETag) deliberately, with no caching of personalised or sensitive responses.
+    best_practice: Return 429 with Retry-After; set no-store on sensitive responses; use conditional requests for read-heavy resources.
+    audit_requirement: null
+    priority: medium
+    monitoring:
+      - source: oneagent_default
+        signal: "429 response rate and response size"
+    verification:
+      sources: [manual_review, stage1_dataset]
+      stage1_paths:
+        - "repositories[].application_capacity[].category"
+        - "infrastructure.mesh.traffic_policies[].kind"
+      criteria: Rate limiting exists in application, gateway or mesh and headers are set on sensitive responses.
+  - id: REST-006
+    title: Health, readiness and version endpoints separate from business API
+    extends: BASE-HC-001
+    requirement: Health and info endpoints are served separately from the business API (own path or port), are unauthenticated only for the platform, and do not expose sensitive details.
+    best_practice: Return a version and build id for troubleshooting; keep health responses minimal.
+    audit_requirement: null
+    priority: medium
+    monitoring:
+      - source: platform
+        signal: "probe results"
+    verification:
+      sources: [stage1_dataset]
+      stage1_paths:
+        - "repositories[].entry_points[].route"
+        - "infrastructure.workloads[].containers[].readiness"
+      criteria: Probes use dedicated paths.

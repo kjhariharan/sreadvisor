@@ -1,0 +1,101 @@
+id: cicd_harness
+title: Harness CI/CD
+layer: tech_stack
+category: cicd
+description: Requirements for delivery pipelines defined in Harness (pipelines, stages, step groups, templates, delegates).
+extends: [baseline]
+detect:
+  - infra: harness
+recognizes: []
+catalogue_refs: [oneagent_default, application_level]
+entry_extensions:
+  harness_construct: "the Harness object the requirement is expressed through (strategy, failureStrategies, rollbackSteps, ...)"
+entries:
+  - id: HRN-001
+    title: Deployment stages use a progressive strategy
+    extends: DEP-001
+    harness_construct: stage.spec.execution (Canary, BlueGreen, Rolling)
+    requirement: Production deploy stages use a Harness Canary, Blue-Green or Rolling execution strategy with phased steps, not a bare apply of all instances.
+    best_practice: Use canary phases with a verification step between them; keep rolling batch size small for user-facing services.
+    audit_requirement: Pipeline execution records (who, what, when) are retained.
+    priority: high
+    monitoring:
+      - source: platform
+        signal: "pipeline execution status and phase durations"
+      - source: oneagent_default
+        signal: "error rate and response time during phases"
+    verification:
+      sources: [stage1_dataset]
+      stage1_paths:
+        - "infrastructure.pipelines[].system"
+        - "infrastructure.pipelines[].deployment_strategy"
+        - "infrastructure.pipelines[].strategy_evidence"
+      criteria: Harness pipelines that deploy show a canary, blue_green or rolling deployment_strategy.
+  - id: HRN-002
+    title: Rollback steps and failure strategies defined
+    extends: DEP-002
+    harness_construct: stage.spec.execution.rollbackSteps, failureStrategies
+    requirement: Each deploy stage defines rollbackSteps and a failure strategy (rollback stage on failure or verification failure), so a failed step reverts automatically, or a manual rollback pipeline is documented.
+    best_practice: Use automatic rollback on verification failure; keep a separate tested rollback pipeline for post-release regressions.
+    audit_requirement: Rollback executions record the trigger and approver.
+    priority: critical
+    monitoring:
+      - source: platform
+        signal: "rollback executions per service"
+    verification:
+      sources: [stage1_dataset]
+      stage1_paths:
+        - "infrastructure.pipelines[].rollback.mode"
+        - "infrastructure.pipelines[].rollback.evidence"
+      criteria: rollback.mode is automated or manual for Harness pipelines that deploy.
+  - id: HRN-003
+    title: Continuous verification against monitoring
+    extends: DEP-008
+    harness_construct: Verify step with the monitoring provider
+    requirement: Deploy stages include a verification step using the monitoring provider (for example Dynatrace) that compares the new version against the baseline before completing the rollout.
+    best_practice: Verify error rate, latency and saturation for a defined window; fail the stage on regression so rollback triggers.
+    audit_requirement: Verification results are stored with the execution.
+    priority: medium
+    monitoring:
+      - source: oneagent_default
+        signal: "service failure rate and response time for old and new versions"
+    verification:
+      sources: [stage1_dataset, manual_review]
+      stage1_paths:
+        - "infrastructure.pipelines[].deploy_steps"
+      criteria: A verification step appears between deployment and completion.
+  - id: HRN-004
+    title: Database migrations as a separate, approved step
+    extends: DEP-003
+    harness_construct: dedicated migration step or stage with approval
+    requirement: Schema migration runs in its own stage or step before the application deploy, with approval where policy requires, and the pipeline halts on migration failure.
+    best_practice: Run migrations from a versioned image or job; keep the deploy stage dependent on migration success.
+    audit_requirement: Migration executions and approvals retained.
+    priority: high
+    monitoring:
+      - source: platform
+        signal: "migration step outcome and duration"
+    verification:
+      sources: [stage1_dataset]
+      stage1_paths:
+        - "infrastructure.pipelines[].db_migration.present"
+        - "infrastructure.pipelines[].db_migration.separate_step"
+        - "infrastructure.pipelines[].db_migration.tool"
+      criteria: When a migration tool is present, separate_step is true.
+  - id: HRN-005
+    title: Secrets through Harness secret managers and governed templates
+    extends: SEC-002
+    harness_construct: secretManager references, pipeline templates, OPA policies
+    requirement: Pipelines read credentials from a Harness secret manager (Vault, GCP Secret Manager or similar) by reference, use shared templates for deploy stages, and are governed by policy (OPA) checks.
+    best_practice: Scope secrets to projects; use step templates for security scans; keep delegates highly available and least-privileged.
+    audit_requirement: Harness audit trail is retained and exported.
+    priority: medium
+    monitoring:
+      - source: platform
+        signal: "delegate health and pipeline policy evaluation failures"
+    verification:
+      sources: [manual_review, stage1_dataset]
+      stage1_paths:
+        - "infrastructure.secrets.sourced_from[].mechanism"
+        - "infrastructure.secrets.hardcoded[].kind"
+      criteria: No literal credentials in pipeline YAML; secrets are referenced through a secret manager.

@@ -1,0 +1,88 @@
+id: cicd_ucd
+title: UrbanCode Deploy (UCD)
+layer: tech_stack
+category: cicd
+description: Requirements for deployments driven by IBM UrbanCode Deploy application, component and generic processes. Applies where UCD is used.
+extends: [baseline]
+detect:
+  - infra: ucd
+recognizes: []
+catalogue_refs: [oneagent_default, application_level]
+entries:
+  - id: UCD-001
+    title: Deployment and rollback processes are both defined
+    extends: DEP-002
+    requirement: Each application has an application process for deployment and a tested application process for rollback (redeploying the previous snapshot), and the deploy process handles failure by invoking or preparing rollback.
+    best_practice: Use component version snapshots for whole-application rollback; rehearse rollback in a lower environment.
+    audit_requirement: Every deployment and rollback request is recorded with requester and approver.
+    priority: critical
+    monitoring:
+      - source: platform
+        signal: "process execution results per environment"
+    verification:
+      sources: [stage1_dataset]
+      stage1_paths:
+        - "infrastructure.pipelines[].system"
+        - "infrastructure.pipelines[].rollback.mode"
+        - "infrastructure.pipelines[].deploy_steps"
+      criteria: A rollback process exists for each deployment process (rollback.mode is not none_defined).
+  - id: UCD-002
+    title: Environment approvals and gates
+    extends: DEP-006
+    requirement: Production environments require approval processes and pass configured gates (tests, change ticket) before deployment.
+    best_practice: Use environment gates; restrict who can deploy to production by role; separate duties between requester and approver.
+    audit_requirement: Approval history is retained per deployment.
+    priority: high
+    monitoring:
+      - source: platform
+        signal: "approvals pending and gate results"
+    verification:
+      sources: [manual_review, stage1_dataset]
+      stage1_paths:
+        - "infrastructure.pipelines[].deploy_steps"
+      criteria: Approval and gate steps are defined for production.
+  - id: UCD-003
+    title: Versioned snapshots and immutable component versions
+    extends: DEP-007
+    requirement: Deployments reference component versions and snapshots that are immutable and traceable to a build; latest or floating versions are not deployed to production.
+    best_practice: Create a snapshot per release candidate; promote the same snapshot through environments.
+    audit_requirement: Snapshot to commit traceability retained.
+    priority: medium
+    monitoring:
+      - source: platform
+        signal: "deployed version per environment"
+    verification:
+      sources: [manual_review]
+      criteria: Production deployments reference snapshots, not floating versions.
+  - id: UCD-004
+    title: Sensitive properties secured and agents highly available
+    extends: SEC-002
+    requirement: Passwords and tokens in process properties are stored as secure properties (or from a vault plug-in), and UCD agents and servers used for production run with redundancy.
+    best_practice: Mask secure properties in logs; use agent relays and at least two agents for critical deployment paths.
+    audit_requirement: Access to secure properties is audited.
+    priority: medium
+    monitoring:
+      - source: platform
+        signal: "agent online status"
+    verification:
+      sources: [stage1_dataset]
+      stage1_paths:
+        - "infrastructure.secrets.hardcoded[].kind"
+        - "infrastructure.secrets.hardcoded[].location_type"
+      criteria: No literal credentials appear in UCD process definitions.
+  - id: UCD-005
+    title: Database changes as separate processes
+    extends: DEP-003
+    requirement: Database schema changes run as their own component process with approval, executed before the application component, not embedded in the application start-up.
+    best_practice: Keep database change scripts versioned as components; run a compatibility check before the application step.
+    audit_requirement: Schema change executions retained.
+    priority: high
+    monitoring:
+      - source: platform
+        signal: "database component process results"
+    verification:
+      sources: [stage1_dataset]
+      stage1_paths:
+        - "infrastructure.pipelines[].db_migration.present"
+        - "infrastructure.pipelines[].db_migration.separate_step"
+      criteria: Migration steps are separate processes when present.

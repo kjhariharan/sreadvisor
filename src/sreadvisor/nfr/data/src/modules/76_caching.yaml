@@ -1,0 +1,100 @@
+id: caching
+title: Caching
+layer: tech_stack
+category: data
+description: Requirements for in-process caches (Caffeine, Ehcache) and distributed caches (Redis, Memcached, Hazelcast). This module goes beyond the brief's named list because the pilot service uses Spring Cache with Caffeine.
+extends: [baseline]
+detect:
+  - dependency: "caffeine|ehcache|cache-api|jcache|starter-cache|redis|lettuce|jedis|memcached|hazelcast|infinispan|ioredis|cachetools|diskcache"
+recognizes: []
+catalogue_refs: [oneagent_default, application_level]
+entry_extensions:
+  cache_kind: "in_process | distributed: whether the requirement applies to in-process caches, distributed caches, or both"
+entries:
+  - id: CACHE-001
+    title: Bounded size and explicit expiry
+    cache_kind: both
+    requirement: Every cache has a maximum size (or memory limit) and a time-to-live or expiry policy, so it cannot grow without bound or serve indefinitely stale data.
+    best_practice: Set maximumSize and expireAfterWrite (or Redis maxmemory with an eviction policy and key TTLs); choose TTLs from the staleness the business tolerates.
+    audit_requirement: null
+    priority: high
+    monitoring:
+      - source: library_emitted
+        signal: "cache size, evictions and hit ratio"
+      - source: oneagent_default
+        signal: "JVM or process memory growth"
+    verification:
+      sources: [stage1_dataset]
+      stage1_paths:
+        - "repositories[].reliability_patterns[].pattern"
+        - "repositories[].reliability_patterns[].mechanism"
+        - "repositories[].reliability_patterns[].parameters"
+        - "repositories[].application_capacity[].key"
+      criteria: Each cache pattern lists a size bound and expiry, or configuration exists for them.
+  - id: CACHE-002
+    title: Cache failure never fails the request when the source is available
+    cache_kind: distributed
+    extends: BASE-CB-001
+    requirement: If a distributed cache is unreachable or slow, the service falls back to the source of truth (with timeouts and a circuit breaker on the cache client) rather than failing requests.
+    best_practice: Short client timeouts; treat cache errors as misses; protect the source from a thundering herd with rate limits.
+    audit_requirement: null
+    priority: high
+    monitoring:
+      - source: oneagent_default
+        signal: "response time and failure rate of calls to the cache service"
+      - source: library_emitted
+        signal: "cache client errors and timeouts"
+    verification:
+      sources: [stage1_dataset]
+      stage1_paths:
+        - "repositories[].dependency_classification[].dependency"
+        - "repositories[].dependency_classification[].kind"
+        - "repositories[].dependency_classification[].classification"
+      criteria: A distributed cache dependency is classified gracefully_degradable, or has a documented reason for hard failure.
+  - id: CACHE-003
+    title: Stampede protection and warm-up
+    cache_kind: both
+    requirement: Concurrent misses for the same key are coalesced (loading cache, single flight), expiry is jittered, and cold-start warm-up is defined for caches that protect a slow source.
+    best_practice: Use loading caches with refreshAfterWrite; add TTL jitter; avoid all pods expiring together.
+    audit_requirement: null
+    priority: medium
+    monitoring:
+      - source: library_emitted
+        signal: "load time and load failure counts"
+      - source: oneagent_default
+        signal: "source dependency request rate after deployments"
+    verification:
+      sources: [manual_review]
+      criteria: Loading or single-flight semantics are used for hot keys.
+  - id: CACHE-004
+    title: Sensitive data is not cached without protection
+    cache_kind: both
+    requirement: Personal or secret data is not cached (or is cached only in encrypted, access-controlled stores with short TTLs), and per-user cache keys prevent cross-user leakage.
+    best_practice: Classify cached data; include tenant and user in keys; require TLS and authentication for distributed caches.
+    audit_requirement: Cached data classes are documented for privacy review.
+    priority: high
+    monitoring:
+      - source: logs
+        signal: "cache access by service identity"
+    verification:
+      sources: [manual_review, stage1_dataset]
+      stage1_paths:
+        - "repositories[].reliability_patterns[].protects"
+        - "business_context.domain_entities"
+      criteria: Cached methods do not return personal data unless justified.
+  - id: CACHE-005
+    title: Distributed cache is secured and highly available
+    cache_kind: distributed
+    requirement: Redis, Memcached or Hazelcast clusters require authentication and TLS, run with replication or managed HA, and have a defined behaviour on node loss.
+    best_practice: Use managed offerings with HA tiers; restrict network access; set persistence deliberately.
+    audit_requirement: Access and configuration changes are logged.
+    priority: high
+    monitoring:
+      - source: platform
+        signal: "cache node health, memory use and replication status"
+    verification:
+      sources: [stage1_dataset, manual_review]
+      stage1_paths:
+        - "infrastructure.workloads[].replicas"
+        - "repositories[].encryption_audit.facts[].status"
+      criteria: Distributed cache instances are replicated and require TLS and authentication.

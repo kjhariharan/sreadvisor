@@ -1,0 +1,155 @@
+id: dependency_criticality
+title: Dependency criticality
+layer: cross_cutting
+category: cross_cutting
+description: >-
+  Whether each dependency whose outage fails a request has either a justified reason for having no degradation
+  handling or a circuit breaker, fallback, cache or similar pattern, worked through in blast-radius order.
+  Evaluated against the dependency classification and blast radius produced during Stage 1 transaction flow tracing.
+detect:
+  - always: true
+recognizes: []
+catalogue_refs: []
+entry_extensions:
+  prioritisation: "how Stage 3 should order findings for this entry (for example descending blast radius)"
+entries:
+  - id: DC-001
+    title: Every hard failure dependency is justified or protected
+    requirement: >-
+      Each dependency classified as hard_failure has either a recorded justification for lacking degradation handling
+      (for example the data is the system of record and a stale answer would be wrong) or a circuit breaker, fallback, cache
+      or comparable pattern applied.
+    best_practice: >-
+      For read paths prefer a cache or stale-serving fallback; for optional enrichments return a reduced response; for the system
+      of record accept the hard dependency but make it highly available and fast to fail; document the decision either way.
+    audit_requirement: Each accepted hard dependency and its justification is recorded and re-reviewed on architecture change.
+    priority: critical
+    prioritisation: descending blast radius (number of flows and entry points that fail)
+    monitoring:
+      - source: oneagent_default
+        signal: "availability, failure rate and response time of the dependency's service"
+      - source: library_emitted
+        signal: "breaker state and fallback invocation counters where a pattern exists"
+    verification:
+      sources: [stage1_dataset, runtime_telemetry]
+      stage1_paths:
+        - "repositories[].dependency_classification[].dependency"
+        - "repositories[].dependency_classification[].classification"
+        - "repositories[].dependency_classification[].rationale"
+        - "repositories[].dependency_classification[].protecting_patterns"
+        - "repositories[].dependency_classification[].degradable_flows"
+      criteria: >-
+        For every classification hard_failure, protecting_patterns is non-empty or the rationale gives a justification;
+        otherwise it is a finding to recommend a circuit breaker, fallback or cache. A dependency the observability provider
+        shows in the live topology but that was never classified at all (because code/infra analysis never found it) is the
+        same finding by extension: it has no recorded protection either, and is a distinct, runtime-only instance of this gap.
+  - id: DC-002
+    title: Findings are prioritised by blast radius
+    requirement: Remediation of dependency findings is ordered by blast radius, largest first, so the dependencies that would fail the most transactions are addressed first.
+    best_practice: Weight by the business importance of the failed flows (from the business context) as well as their number.
+    audit_requirement: null
+    priority: high
+    prioritisation: descending blast radius
+    monitoring:
+      - source: oneagent_default
+        signal: "request volume of the entry points in each blast radius"
+    verification:
+      sources: [stage1_dataset]
+      stage1_paths:
+        - "repositories[].dependency_classification[].blast_radius"
+        - "repositories[].dependency_classification[].blast_radius_description"
+        - "repositories[].transaction_flows[].entry_point"
+        - "business_context.key_operations"
+      criteria: Dependencies are ranked by the size of blast_radius and the business importance of the affected entry points.
+  - id: DC-003
+    title: Hard failure dependencies fail fast
+    requirement: A hard failure dependency has a timeout (and where retries apply, a bounded retry), so its outage becomes a fast error instead of exhausting threads and connections.
+    best_practice: Timeouts shorter than the caller's; bulkhead or pool isolation per dependency; clear error mapping to the caller.
+    audit_requirement: null
+    priority: high
+    prioritisation: descending blast radius
+    extends: BASE-TO-001
+    monitoring:
+      - source: oneagent_default
+        signal: "response time percentiles of calls to the dependency"
+      - source: library_emitted
+        signal: "pool acquisition timeouts and pending requests"
+    verification:
+      sources: [stage1_dataset]
+      stage1_paths:
+        - "repositories[].reliability_patterns[].pattern"
+        - "repositories[].reliability_patterns[].protects"
+        - "repositories[].dependency_classification[].dependency"
+        - "repositories[].application_capacity[].key"
+      criteria: Each hard_failure dependency has a timeout pattern or a configured client or pool timeout.
+  - id: DC-004
+    title: Degraded behaviour of degradable dependencies is defined and exercised
+    requirement: For each gracefully_degradable dependency the reduced behaviour (stale data, default response, feature disabled) is specified, and it is exercised in tests or fault-injection drills.
+    best_practice: Test with the dependency down and slow; surface degraded mode in a response header or metric so it is visible.
+    audit_requirement: Fault-injection or game-day results are retained.
+    priority: medium
+    monitoring:
+      - source: custom_instrumentation
+        signal: "fallback or degraded-mode invocation counter"
+      - source: library_emitted
+        signal: "cache hit ratio and stale-serve counters"
+    verification:
+      sources: [stage1_dataset, manual_review]
+      stage1_paths:
+        - "repositories[].dependency_classification[].degradable_flows"
+        - "repositories[].dependency_classification[].protecting_patterns"
+      criteria: Each degradable dependency names its protecting pattern and the flows that degrade; a test or drill exists (manual review).
+  - id: DC-005
+    title: Mesh-layer protection is recognised
+    requirement: A dependency with no resilience pattern in application code is considered protected only if a mesh-level retry, timeout or circuit-breaking policy applies to its host.
+    best_practice: Keep resilience in one layer per concern; document which layer owns retries and timeouts; verify mesh policy host names match the real dependency host.
+    audit_requirement: null
+    priority: medium
+    monitoring:
+      - source: platform
+        signal: "mesh proxy retry, timeout and outlier-detection counters"
+    verification:
+      sources: [stage1_dataset]
+      stage1_paths:
+        - "cross_references[].kind"
+        - "cross_references[].facts"
+        - "infrastructure.mesh.traffic_policies[].host"
+        - "infrastructure.mesh.traffic_policies[].kind"
+      criteria: For hard_failure dependencies without code-level patterns, a dependency_mesh_policies cross reference shows a matching mesh policy.
+  - id: DC-006
+    title: Shared data stores and caches are not single points of failure
+    requirement: Every datastore or cache classified as a dependency has a redundancy or recovery design (replicas, failover, backup and restore) appropriate to its blast radius.
+    best_practice: Use managed high-availability tiers or replicated topologies; test failover; define RPO and RTO per datastore.
+    audit_requirement: Backup, restore tests and RPO/RTO are documented and evidenced.
+    priority: high
+    prioritisation: descending blast radius
+    monitoring:
+      - source: platform
+        signal: "replication lag, failover events and backup success"
+      - source: oneagent_default
+        signal: "availability of the database service as seen by callers"
+    verification:
+      sources: [stage1_dataset, manual_review]
+      stage1_paths:
+        - "repositories[].dependency_classification[].kind"
+        - "repositories[].dependency_classification[].blast_radius"
+        - "infrastructure.workloads[].replicas"
+        - "infrastructure.terraform_resources[].attributes"
+      criteria: Datastores in the dependency list run with replication or a managed HA tier, or the single-instance choice is justified (for example local development only).
+  - id: DC-007
+    title: Dependency health is observable from the calling service
+    requirement: The availability, latency and error rate of each dependency are visible from the caller's telemetry, with alerts for the hard failure dependencies.
+    best_practice: Use the observability platform's automatic dependency detection; alert on dependency failure rate, not only on the caller's own errors.
+    audit_requirement: null
+    priority: medium
+    monitoring:
+      - source: oneagent_default
+        signal: "service-to-service and service-to-database call metrics"
+      - source: custom_instrumentation
+        signal: "metrics for dependencies that are not automatically detected"
+    verification:
+      sources: [stage1_dataset, runtime_telemetry]
+      stage1_paths:
+        - "repositories[].transaction_flows[].dependencies[].name"
+        - "repositories[].dependency_classification[].dependency"
+      criteria: Each classified dependency appears in the provider's topology with request metrics.

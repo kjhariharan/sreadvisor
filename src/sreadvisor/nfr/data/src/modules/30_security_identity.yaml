@@ -1,0 +1,113 @@
+id: oauth2_identity
+title: OAuth2 identity
+layer: tech_stack
+category: security
+description: Requirements for services that authenticate with or through an OAuth 2.0 / OpenID Connect identity provider, as a resource server, a client, or both.
+extends: [baseline]
+detect:
+  - dependency: "oauth2|oidc|openid|keycloak|nimbus-jose|authlib|msal|okta|auth0|passport-oauth|microsoft\\.identity|spring-security-oauth|golang\\.org/x/oauth2|oauth2-proxy"
+recognizes: []
+catalogue_refs: [oneagent_default, application_level]
+entry_extensions:
+  flow: "the OAuth2 grant or role the requirement applies to (client_credentials, authorization_code, resource_server)"
+entries:
+  - id: OA-001
+    title: Token refresh handled before expiry and safely under concurrency
+    flow: client_credentials, authorization_code
+    requirement: Clients cache access tokens and refresh them shortly before expiry (with clock-skew margin), refresh at most once concurrently (single flight), and handle refresh-token rotation and refresh failure without dropping requests.
+    best_practice: Refresh proactively at around 80 percent of lifetime; retry refresh with bounded backoff; on refresh failure fall back to re-authentication and a circuit breaker; never log tokens.
+    audit_requirement: Token issuance and refresh failures are logged with client id (not the token).
+    priority: high
+    monitoring:
+      - source: custom_instrumentation
+        signal: "token refresh success, failure and latency counters"
+      - source: oneagent_default
+        signal: "response time and failure rate of the token endpoint call"
+    verification:
+      sources: [stage1_dataset, manual_review]
+      stage1_paths:
+        - "repositories[].fingerprint.dependencies[].name"
+        - "repositories[].reliability_patterns[].pattern"
+        - "repositories[].transaction_flows[].dependencies[].name"
+      criteria: An OAuth2 client library with token caching and refresh is used; the token endpoint is treated as a dependency with a timeout and a breaker.
+  - id: OA-002
+    title: Credential rotation without downtime
+    flow: client_credentials
+    requirement: Client secrets or keys rotate on a schedule and after suspected leaks, with two credentials valid during the overlap, and services reload them without a redeploy.
+    best_practice: Prefer private_key_jwt or mTLS client authentication over shared secrets; store credentials in a secrets manager; alert on credentials near expiry.
+    audit_requirement: Rotation events and credential age are recorded and reviewed.
+    priority: high
+    monitoring:
+      - source: platform
+        signal: "client credential age and expiry countdown"
+      - source: logs
+        signal: "invalid_client errors after rotation"
+    verification:
+      sources: [stage1_dataset, manual_review]
+      stage1_paths:
+        - "repositories[].secrets.sourced_from[].mechanism"
+        - "repositories[].secrets.hardcoded[].kind"
+      criteria: Client credentials come from a secrets manager or vault and none are hardcoded.
+  - id: OA-003
+    title: Resource server validates tokens completely
+    flow: resource_server
+    requirement: Every protected endpoint validates the signature, issuer, audience, expiry and not-before of the access token, and enforces scopes or roles per operation.
+    best_practice: Validate against the issuer's published keys (JWKS) with caching and key-rotation support; reject tokens with the wrong audience; map scopes to least-privilege permissions.
+    audit_requirement: Authorization decisions for sensitive operations are logged with subject and scope.
+    priority: critical
+    monitoring:
+      - source: custom_instrumentation
+        signal: "authentication failures by reason"
+      - source: oneagent_default
+        signal: "401 and 403 response rate"
+    verification:
+      sources: [manual_review, stage1_dataset]
+      stage1_paths:
+        - "repositories[].entry_points[].route"
+        - "repositories[].fingerprint.dependencies[].name"
+      criteria: Resource server configuration validates issuer and audience and every non-public route is secured.
+  - id: OA-004
+    title: Identity provider outage tolerated
+    flow: resource_server, client_credentials
+    extends: BASE-CB-001
+    requirement: "Temporary unavailability of the identity provider does not fail already-authenticated traffic: JWKS keys are cached, token endpoint calls have timeouts and breakers, and cached tokens are used until expiry."
+    best_practice: Refresh JWKS in the background with a stale-if-error window; set short timeouts on discovery and token calls.
+    audit_requirement: null
+    priority: high
+    monitoring:
+      - source: oneagent_default
+        signal: "availability of the identity provider service as seen by callers"
+      - source: library_emitted
+        signal: "JWKS refresh failures"
+    verification:
+      sources: [stage1_dataset]
+      stage1_paths:
+        - "repositories[].dependency_classification[].dependency"
+        - "repositories[].dependency_classification[].classification"
+      criteria: The identity provider dependency is classified and, if hard_failure, protected by caching or a fallback.
+  - id: OA-005
+    title: Authorization code flow uses PKCE and secure redirect handling
+    flow: authorization_code
+    requirement: Public and browser-based clients use the authorization code flow with PKCE, exact-match redirect URIs and state validation; the implicit and password grants are not used.
+    best_practice: Keep tokens out of URLs and local storage where possible; use short-lived access tokens and rotating refresh tokens.
+    audit_requirement: null
+    priority: high
+    monitoring:
+      - source: logs
+        signal: "redirect URI mismatch and invalid state events"
+    verification:
+      sources: [manual_review]
+      criteria: Client registration and code use authorization code with PKCE only.
+  - id: OA-006
+    title: Token and session revocation
+    flow: authorization_code
+    requirement: Logout and account compromise revoke sessions and refresh tokens, and access tokens are short-lived enough that revocation takes effect within the accepted window.
+    best_practice: Use token revocation and introspection for high-risk operations; back-channel logout for federated sessions.
+    audit_requirement: Revocations are recorded with the reason.
+    priority: medium
+    monitoring:
+      - source: logs
+        signal: "revocation and logout events"
+    verification:
+      sources: [manual_review]
+      criteria: Revocation paths exist and access token lifetime is documented.

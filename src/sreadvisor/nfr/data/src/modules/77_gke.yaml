@@ -1,0 +1,99 @@
+id: gke
+title: Google Kubernetes Engine (GKE)
+layer: tech_stack
+category: iac_container
+description: Requirements for workloads on Google Kubernetes Engine, in addition to the Kubernetes module. Applies when GKE clusters (Terraform google_container_*) or Google-hosted container images are found.
+extends: [baseline, kubernetes]
+detect:
+  - terraform: "google_container"
+  - image: "gcr\\.io/|pkg\\.dev/"
+recognizes:
+  - terraform: "^google_(container|compute|project|service)"
+catalogue_refs: [oneagent_default, application_level]
+entry_extensions:
+  gcp_resource: "the Google Cloud resource type or setting involved"
+entries:
+  - id: GKE-001
+    title: Regional cluster with managed node lifecycle
+    extends: K8S-004
+    gcp_resource: google_container_cluster (regional), release_channel, node_pool management auto_repair and auto_upgrade
+    requirement: Production clusters are regional, subscribe to a release channel, and node pools have auto-repair and auto-upgrade enabled with surge upgrade settings and maintenance windows chosen deliberately.
+    best_practice: Spread nodes across at least three zones; use surge upgrades with maxSurge and maxUnavailable sized to keep capacity; avoid pinning cluster versions that fall out of support.
+    audit_requirement: Cluster and node pool changes are captured in Cloud Audit Logs.
+    priority: high
+    monitoring:
+      - source: platform
+        signal: node pool health, upgrade status and autoscaler events
+    verification:
+      sources: [stage1_dataset]
+      stage1_paths:
+        - "infrastructure.terraform_resources[].type"
+        - "infrastructure.terraform_resources[].attributes"
+      criteria: Cluster resources are regional with a release channel and auto-repair and auto-upgrade set on node pools.
+  - id: GKE-002
+    title: Workload Identity and private cluster networking
+    extends: ZT-004
+    gcp_resource: workload_identity_config, private_cluster_config, master_authorized_networks_config
+    requirement: Workloads reach Google Cloud APIs through Workload Identity (no node service account keys or exported keys), nodes are private, and the control plane endpoint is restricted with authorised networks.
+    best_practice: Bind one Kubernetes service account to one Google service account with the minimum roles; disable legacy metadata endpoints; use VPC-native clusters.
+    audit_requirement: IAM and Workload Identity bindings are reviewed on a schedule.
+    priority: high
+    monitoring:
+      - source: platform
+        signal: Cloud Audit Logs for IAM use by workload identities
+    verification:
+      sources: [stage1_dataset]
+      stage1_paths:
+        - "infrastructure.terraform_resources[].attributes"
+        - "infrastructure.workloads[].service_account"
+      criteria: Workload Identity is configured and workloads use a dedicated service account with no static keys.
+  - id: GKE-003
+    title: Node pools sized and autoscaled for the workload classes
+    extends: CAP-002
+    gcp_resource: node_pool autoscaling, machine_type, Autopilot or Standard mode
+    requirement: Node pools are separated by workload class, use cluster or node auto-provisioning with explicit minimum and maximum sizes, and machine types fit the pods' requests so scheduling is not fragmented.
+    best_practice: Set requests on every pod (Autopilot bills by requests); keep headroom for surge and node failure; use spot capacity only for tolerant workloads.
+    audit_requirement: null
+    priority: medium
+    monitoring:
+      - source: platform
+        signal: node utilisation, unschedulable pods and autoscaler decisions
+    verification:
+      sources: [stage1_dataset]
+      stage1_paths:
+        - "infrastructure.terraform_resources[].attributes"
+        - "infrastructure.workloads[].containers[].requests"
+      criteria: Node pool autoscaling bounds are set and pods declare requests.
+  - id: GKE-004
+    title: Image provenance and vulnerability scanning
+    extends: DKR-002
+    gcp_resource: Artifact Registry scanning, Binary Authorization
+    requirement: Images come from Artifact Registry with vulnerability scanning enabled, are pinned by tag or digest, and clusters enforce Binary Authorization where policy requires signed images.
+    best_practice: Scan on push and continuously; block deployment of critical vulnerabilities; keep base images current.
+    audit_requirement: Scan results and attestations retained per release.
+    priority: medium
+    monitoring:
+      - source: platform
+        signal: image vulnerabilities by severity and Binary Authorization denials
+    verification:
+      sources: [stage1_dataset]
+      stage1_paths:
+        - "infrastructure.workloads[].containers[].image"
+      criteria: Images are from a governed registry and carry explicit versions.
+  - id: GKE-005
+    title: Cluster logging, monitoring and audit enabled
+    extends: K8S-007
+    gcp_resource: logging_config, monitoring_config, managed Prometheus, Kubernetes audit logs
+    requirement: System and workload logging and monitoring are enabled for the cluster, control plane audit logs are retained, and dataplane network policy enforcement is on.
+    best_practice: Enable Cloud Audit Logs for admin and data access where needed; use GKE Dataplane V2 or Calico for network policy enforcement.
+    audit_requirement: Audit and admin activity logs retained per policy.
+    priority: high
+    monitoring:
+      - source: platform
+        signal: log ingestion and control plane audit log volume
+    verification:
+      sources: [stage1_dataset, manual_review]
+      stage1_paths:
+        - "infrastructure.terraform_resources[].attributes"
+        - "infrastructure.network_policies[].name"
+      criteria: Logging, monitoring and network policy enforcement are configured on the cluster.

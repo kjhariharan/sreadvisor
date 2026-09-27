@@ -1,0 +1,109 @@
+id: observability_dynatrace
+title: Dynatrace observability
+layer: tech_stack
+category: observability
+description: Requirements for how a service is onboarded and operated in Dynatrace. Applies when Dynatrace is the active observability provider.
+extends: [baseline]
+detect:
+  - observability_provider: dynatrace
+recognizes:
+  - dependency: "opentelemetry|otel|micrometer-registry-dynatrace|dynatrace"
+catalogue_refs: [oneagent_default, application_level]
+entry_extensions:
+  dynatrace_feature: "the Dynatrace capability the requirement is expressed through"
+entries:
+  - id: DT-001
+    title: OneAgent full-stack monitoring on every process
+    dynatrace_feature: Dynatrace Operator (cloudNativeFullStack or applicationMonitoring), OneAgent
+    requirement: OneAgent is deployed on all hosts or injected into all pods of the service (through the Dynatrace Operator on Kubernetes), at a supported version, with deep monitoring enabled for the service's technology.
+    best_practice: Use the Operator's cloud-native full-stack mode; keep agents on the automatic update schedule; restrict injection by namespace labels deliberately.
+    audit_requirement: Agent versions and coverage are reported periodically.
+    priority: critical
+    monitoring:
+      - source: oneagent_default
+        signal: "OneAgent connectivity, version and monitored process count"
+    verification:
+      sources: [runtime_telemetry, stage1_dataset]
+      stage1_paths:
+        - "observability.provider"
+        - "observability.service_id"
+        - "infrastructure.workloads[].containers[].image"
+      criteria: The bound service id resolves to a monitored service whose processes report through OneAgent.
+  - id: DT-002
+    title: Service ownership, tags and naming
+    dynatrace_feature: automatic tags, management zones, ownership, request naming
+    requirement: Every service carries ownership, environment and tier tags, sits in the right management zone or segment, and has meaningful service and request names, so problems route to the correct team.
+    best_practice: Derive tags from Kubernetes labels and annotations; define naming rules; keep ownership in a single source.
+    audit_requirement: Ownership records are reviewed periodically.
+    priority: high
+    monitoring:
+      - source: platform
+        signal: "services without owner or environment tags"
+    verification:
+      sources: [runtime_telemetry, manual_review]
+      criteria: The service has owner, environment and tier tags.
+  - id: DT-003
+    title: Key requests, SLOs and alerting profiles for critical operations
+    dynatrace_feature: key requests, SLOs, anomaly detection, alerting profiles
+    requirement: The critical business operations are marked as key requests, have SLOs with burn-rate alerting, and anomaly detection is tuned (fixed thresholds where baselining is unsuitable), with alerts routed to the owning team.
+    best_practice: Derive key requests from the business context and transaction flows; use multi-window burn-rate alerts; link problems to runbooks.
+    audit_requirement: SLO and alert configuration changes are versioned.
+    priority: high
+    monitoring:
+      - source: oneagent_default
+        signal: "key request response time and failure rate"
+      - source: platform
+        signal: "SLO status and burn rate"
+    verification:
+      sources: [stage1_dataset, manual_review]
+      stage1_paths:
+        - "business_context.key_operations"
+        - "repositories[].entry_points[].route"
+        - "repositories[].transaction_flows[].entry_point"
+      criteria: Each key business operation maps to a key request with an SLO and alert.
+  - id: DT-004
+    title: Deployment events and version tagging
+    dynatrace_feature: deployment events, service version detection
+    requirement: The CI/CD pipeline posts deployment events to Dynatrace and services report their version, so releases correlate with changes in error rate or latency.
+    best_practice: Send events from the pipeline with commit, build and environment; use them as inputs to release validation.
+    audit_requirement: null
+    priority: medium
+    monitoring:
+      - source: platform
+        signal: "deployment events per service"
+    verification:
+      sources: [stage1_dataset, manual_review]
+      stage1_paths:
+        - "infrastructure.pipelines[].deploy_steps"
+        - "infrastructure.pipelines[].system"
+      criteria: A pipeline step sends a deployment event.
+  - id: DT-005
+    title: Log ingestion correlated with traces
+    extends: BASE-LOG-002
+    dynatrace_feature: Log Monitoring, log-to-trace correlation
+    requirement: Application logs are ingested with retention set deliberately, and log records carry trace context so they appear on the distributed trace.
+    best_practice: Ingest structured JSON logs; set log storage retention per bucket; mask sensitive fields before ingest.
+    audit_requirement: Log retention settings evidenced.
+    priority: medium
+    monitoring:
+      - source: logs
+        signal: "ingested log volume and retention bucket usage"
+    verification:
+      sources: [runtime_telemetry, manual_review]
+      criteria: Logs from the service are present on its traces and retention is configured.
+  - id: DT-006
+    title: Custom instrumentation only for the gaps, ingested with correct dimensions
+    dynatrace_feature: metric ingestion (Micrometer, OTLP), OpenTelemetry, custom metrics
+    requirement: Metrics from the application-level instrumentation catalogue and business metrics are ingested only where OneAgent has no equivalent, with bounded dimensions and consistent naming, and every custom metric has an owner.
+    best_practice: Check the OneAgent default catalogue first; review custom metric cardinality and cost; document the purpose of each custom metric.
+    audit_requirement: null
+    priority: medium
+    monitoring:
+      - source: library_emitted
+        signal: "ingested custom metric count and dimension cardinality"
+    verification:
+      sources: [stage1_dataset]
+      stage1_paths:
+        - "repositories[].telemetry.libraries[].custom_metrics"
+        - "repositories[].telemetry.libraries[].library"
+      criteria: Custom metrics do not duplicate default signals and have bounded dimensions.

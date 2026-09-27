@@ -1,0 +1,151 @@
+id: deployment_rollback_safety
+title: Deployment and rollback safety
+layer: cross_cutting
+category: cross_cutting
+description: >-
+  Whether releases reach production through a controlled strategy, can be reverted quickly, and keep database changes
+  separate and reviewable. Evaluated against the CI/CD pipeline data (strategy, rollback, migrations) from Stage 1 infrastructure analysis.
+detect:
+  - always: true
+recognizes: []
+catalogue_refs: []
+entry_extensions:
+  pipeline_system: "the CI/CD systems the requirement applies to when it is system specific"
+entries:
+  - id: DEP-001
+    title: Defined deployment strategy rather than an all-at-once rollout
+    requirement: Production deployments use a defined strategy (rolling with surge limits, blue-green or canary), not an in-place recreate of all instances at once.
+    best_practice: Prefer canary or blue-green for user-facing services with automated verification between steps; a rolling update is acceptable when readiness gates and surge limits are set.
+    audit_requirement: The strategy used for each production release is recorded in the deployment log.
+    priority: high
+    monitoring:
+      - source: platform
+        signal: "deployment events and rollout progress"
+      - source: oneagent_default
+        signal: "error rate and response time around deployment events"
+    verification:
+      sources: [stage1_dataset]
+      stage1_paths:
+        - "infrastructure.pipelines[].deploys"
+        - "infrastructure.pipelines[].deployment_strategy"
+        - "infrastructure.pipelines[].strategy_evidence"
+        - "infrastructure.workloads[].strategy"
+      criteria: Each deploying pipeline has deployment_strategy of rolling, blue_green or canary; recreate, unknown or none is a finding.
+  - id: DEP-002
+    title: Automated or documented rollback path
+    requirement: Every deploying pipeline has an automated rollback trigger (health or metric based) or a documented, tested manual rollback step.
+    best_practice: Automate rollback on failed health checks or SLO burn during the rollout; keep the previous version's artifacts and configuration available; rehearse the manual path.
+    audit_requirement: Every rollback is recorded with its trigger and approver.
+    priority: critical
+    monitoring:
+      - source: platform
+        signal: "rollback events per service"
+      - source: oneagent_default
+        signal: "failure rate on the new version during rollout"
+    verification:
+      sources: [stage1_dataset]
+      stage1_paths:
+        - "infrastructure.pipelines[].rollback.mode"
+        - "infrastructure.pipelines[].rollback.evidence"
+      criteria: rollback.mode is automated or manual for every deploying pipeline; none_defined is a finding.
+  - id: DEP-003
+    title: Database migrations run as a separate, reviewable step
+    requirement: Schema migrations run as their own pipeline stage or job that can be reviewed, approved and re-run independently of the application rollout, not bundled invisibly into application start-up.
+    best_practice: Run migrations from a dedicated job before the application step; require review of the migration scripts; avoid application-start-up auto migration on multi-replica production deployments.
+    audit_requirement: Migration scripts, approvals and execution results are retained for audit.
+    priority: high
+    monitoring:
+      - source: platform
+        signal: "migration job status and duration"
+      - source: logs
+        signal: "migration tool execution log"
+    verification:
+      sources: [stage1_dataset]
+      stage1_paths:
+        - "infrastructure.pipelines[].db_migration.present"
+        - "infrastructure.pipelines[].db_migration.tool"
+        - "infrastructure.pipelines[].db_migration.separate_step"
+        - "cross_references[].kind"
+        - "repositories[].fingerprint.dependencies[].categories"
+      criteria: >-
+        If a migration tool is present in the application or pipeline, the pipeline runs it as a separate step
+        (separate_step true); embedded application start-up migration with no pipeline step is a finding.
+  - id: DEP-004
+    title: Backward-compatible (expand and contract) migrations
+    requirement: Each migration is compatible with both the previous and the new application version so a rollback of the application does not need a database rollback.
+    best_practice: Use expand-then-contract; add columns as nullable or defaulted; never drop or rename in the same release that stops using it; test the old version against the new schema.
+    audit_requirement: Destructive migrations require explicit approval.
+    priority: high
+    monitoring:
+      - source: platform
+        signal: "errors from the previous version after a schema change"
+    verification:
+      sources: [manual_review, stage1_dataset]
+      stage1_paths:
+        - "repositories[].fingerprint.dependencies[].name"
+        - "infrastructure.pipelines[].db_migration.tool"
+      criteria: Migration scripts reviewed for backward compatibility; a migration tool with versioned scripts is in use.
+  - id: DEP-005
+    title: Health-gated rollout
+    requirement: New instances receive traffic only after passing readiness, and a rollout stops if new instances do not become ready in a bounded time.
+    best_practice: Define readiness and startup probes; set progress deadlines and minimum ready seconds; keep maxUnavailable at 0 for user-facing services.
+    audit_requirement: null
+    priority: high
+    monitoring:
+      - source: platform
+        signal: "rollout progress and failed-ready instances"
+    verification:
+      sources: [stage1_dataset]
+      stage1_paths:
+        - "infrastructure.workloads[].containers[].readiness"
+        - "infrastructure.workloads[].containers[].startup"
+        - "infrastructure.workloads[].max_unavailable"
+      criteria: Every deployed container has a readiness probe.
+  - id: DEP-006
+    title: Quality and approval gates before production
+    requirement: The pipeline runs automated tests and security checks before the deploy step and requires approval for production according to policy.
+    best_practice: Build once and promote the same artifact; run unit, integration and vulnerability scans as required stages; require approval only where policy demands it, and record it.
+    audit_requirement: Approvals, test results and scan results are retained per release.
+    priority: medium
+    monitoring:
+      - source: platform
+        signal: "pipeline stage results and lead time"
+    verification:
+      sources: [stage1_dataset]
+      stage1_paths:
+        - "infrastructure.pipelines[].deploy_steps"
+        - "infrastructure.pipelines[].name"
+        - "infrastructure.pipelines[].system"
+      criteria: The pipeline definition contains test and scan stages ahead of the deploy step and an approval step for production where policy requires.
+  - id: DEP-007
+    title: Immutable, versioned artifacts
+    requirement: Deployed container images are referenced by an immutable version or digest, never a mutable tag such as latest.
+    best_practice: Tag by commit or build number; pin digests in production manifests; promote the same image across environments.
+    audit_requirement: The running image can be traced to a commit and build.
+    priority: medium
+    monitoring:
+      - source: platform
+        signal: "running image version per workload"
+    verification:
+      sources: [stage1_dataset]
+      stage1_paths:
+        - "infrastructure.workloads[].containers[].image"
+        - "infrastructure.compose_services[].image"
+      criteria: No workload image uses the latest tag or omits a tag.
+  - id: DEP-008
+    title: Post-deployment verification tied to monitoring
+    requirement: A release is verified against live telemetry (error rate, latency) for a bounded window, and a regression triggers rollback or halts progression.
+    best_practice: Use the observability platform's deployment events and automated release validation as a pipeline gate.
+    audit_requirement: Verification results are stored with the release record.
+    priority: medium
+    monitoring:
+      - source: oneagent_default
+        signal: "service failure rate and response time compared with the pre-release baseline"
+      - source: platform
+        signal: "deployment event markers"
+    verification:
+      sources: [stage1_dataset, manual_review]
+      stage1_paths:
+        - "infrastructure.pipelines[].rollback.mode"
+        - "infrastructure.pipelines[].deploy_steps"
+      criteria: The pipeline has an automated verification or automated rollback step after deployment.

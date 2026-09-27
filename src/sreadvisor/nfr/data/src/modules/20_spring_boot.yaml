@@ -1,0 +1,183 @@
+id: spring_boot
+title: Spring Boot
+layer: tech_stack
+category: framework
+description: Requirements specific to Spring Boot services (Spring MVC, WebFlux, Spring Data, Actuator, Spring Cache). Extends the baseline.
+extends: [baseline, lang_java]
+detect:
+  - framework: Spring Boot
+recognizes:
+  - framework: Spring Framework
+  - dependency: "^org\\.springframework|caffeine|cache-api|starter-cache|hibernate|jakarta\\.|thymeleaf|webjars"
+catalogue_refs: [oneagent_default, application_level]
+entry_extensions:
+  spring_property: "the Spring property or annotation the requirement is expressed through"
+entries:
+  - id: SB-001
+    title: Actuator health groups for liveness and readiness
+    extends: BASE-HC-001
+    spring_property: management.endpoint.health.probes.enabled
+    requirement: Spring Boot Actuator is present with liveness and readiness health groups enabled, and the Kubernetes probes call them (/actuator/health/liveness and /actuator/health/readiness).
+    best_practice: Keep the liveness group free of external dependencies; include only critical dependencies in readiness; expose health on the management port; show details only to authorised callers.
+    audit_requirement: null
+    priority: high
+    monitoring:
+      - source: platform
+        signal: "probe results and pod restarts"
+      - source: library_emitted
+        signal: "health status gauge"
+        detail: "management.endpoint.health / Micrometer health metric"
+    verification:
+      sources: [stage1_dataset]
+      stage1_paths:
+        - "repositories[].fingerprint.dependencies[].name"
+        - "infrastructure.workloads[].containers[].liveness"
+        - "infrastructure.workloads[].containers[].readiness"
+        - "infrastructure.workloads[].containers[].startup"
+        - "cross_references[].kind"
+        - "cross_references[].facts"
+      criteria: spring-boot-starter-actuator is a dependency and each container has liveness and readiness probes pointing at actuator health endpoints (health_probes_and_application_health cross reference).
+  - id: SB-002
+    title: Actuator endpoints exposed minimally and protected
+    spring_property: management.endpoints.web.exposure.include
+    requirement: Only the actuator endpoints that are needed (health, info, metrics or prometheus) are exposed over HTTP, on a management port or path that is not publicly routable, and sensitive endpoints (env, heapdump, threaddump, loggers, shutdown) are not exposed or are authenticated.
+    best_practice: Use a separate management port with network policy; secure with Spring Security; disable info leaks such as full health details.
+    audit_requirement: Access to management endpoints is logged.
+    priority: high
+    monitoring:
+      - source: logs
+        signal: "requests to actuator endpoints by caller"
+    verification:
+      sources: [manual_review, stage1_dataset]
+      stage1_paths:
+        - "repositories[].fingerprint.dependencies[].name"
+        - "infrastructure.ingresses[].hosts"
+        - "infrastructure.network_policies[].name"
+      criteria: Exposure configuration lists a minimal set and the ingress does not route to the management path.
+  - id: SB-003
+    title: Graceful shutdown enabled
+    extends: BASE-SHUT-001
+    spring_property: server.shutdown=graceful, spring.lifecycle.timeout-per-shutdown-phase
+    requirement: server.shutdown is graceful with a shutdown phase timeout shorter than the Kubernetes termination grace period.
+    best_practice: Combine with a preStop sleep so the endpoint is removed from load balancing before the server stops accepting requests.
+    audit_requirement: null
+    priority: medium
+    monitoring:
+      - source: oneagent_default
+        signal: "failure rate during rollout windows"
+    verification:
+      sources: [stage1_dataset, manual_review]
+      stage1_paths:
+        - "repositories[].application_capacity[].key"
+        - "infrastructure.workloads[].termination_grace_period_seconds"
+      criteria: server.shutdown=graceful is set (default is immediate in older versions) and the grace period exceeds the phase timeout.
+  - id: SB-004
+    title: Connection pool and server thread settings explicit
+    extends: BASE-MON-002
+    spring_property: spring.datasource.hikari.maximum-pool-size, server.tomcat.threads.max
+    requirement: HikariCP maximum pool size, connection timeout and max lifetime, and the embedded server's thread and connection limits, are set explicitly.
+    best_practice: Pool size from the database connection budget; Tomcat threads consistent with CPU; keep max-lifetime below database and proxy idle timeouts.
+    audit_requirement: null
+    priority: high
+    monitoring:
+      - source: library_emitted
+        signal: "hikaricp.connections.active, pending and timeout"
+      - source: library_emitted
+        signal: "tomcat.threads.busy and current"
+    verification:
+      sources: [stage1_dataset]
+      stage1_paths:
+        - "repositories[].application_capacity[].category"
+        - "repositories[].application_capacity[].key"
+        - "repositories[].application_capacity[].value"
+        - "repositories[].application_capacity[].origin"
+      criteria: db_pool and server_connections settings have origin explicit.
+  - id: SB-005
+    title: Timeouts on RestClient, RestTemplate and WebClient
+    extends: BASE-TO-001
+    requirement: Every RestClient, RestTemplate and WebClient bean has explicit connect and read timeouts through its request factory or HTTP client (the defaults are effectively unlimited).
+    best_practice: Configure through a shared builder or the Spring Boot HTTP client settings; add resilience with Resilience4j or Spring Retry; propagate trace context.
+    audit_requirement: null
+    priority: critical
+    monitoring:
+      - source: library_emitted
+        signal: "http.client.requests timer by outcome"
+      - source: oneagent_default
+        signal: "outbound call response time and failure rate"
+    verification:
+      sources: [stage1_dataset]
+      stage1_paths:
+        - "repositories[].reliability_patterns[].pattern"
+        - "repositories[].transaction_flows[].dependencies[].kind"
+      criteria: Each http_service dependency in the flows has a timeout pattern.
+  - id: SB-006
+    title: Spring Cache bounded and expiring
+    spring_property: spring.cache.caffeine.spec or cache provider settings
+    requirement: Caches used through the Spring Cache abstraction have a maximum size and an expiry (TTL) configured, and cache failure does not fail the request when the source of truth is available.
+    best_practice: Use a bounded provider such as Caffeine with maximumSize and expireAfterWrite; enable statistics for hit ratio; cache errors should be logged and bypassed.
+    audit_requirement: Cached data classes are reviewed for sensitivity.
+    priority: medium
+    monitoring:
+      - source: library_emitted
+        signal: "cache.gets by result, cache.size and cache.evictions"
+        detail: "statistics must be enabled for the provider"
+    verification:
+      sources: [stage1_dataset]
+      stage1_paths:
+        - "repositories[].reliability_patterns[].pattern"
+        - "repositories[].reliability_patterns[].mechanism"
+        - "repositories[].reliability_patterns[].parameters"
+        - "repositories[].fingerprint.dependencies[].categories"
+      criteria: Each cache pattern found lists a size bound and TTL in parameters, or configuration for the cache provider exists.
+  - id: SB-007
+    title: JPA behaviour configured for production
+    spring_property: spring.jpa.open-in-view, spring.jpa.hibernate.ddl-auto
+    requirement: Open-in-view is disabled so database connections are not held during view rendering, schema auto-generation (ddl-auto create, update) is off outside local development, and transactions are scoped to the service layer.
+    best_practice: Set spring.jpa.open-in-view=false; manage schema with a migration tool; use read-only transactions for queries; watch for N+1 selects.
+    audit_requirement: null
+    priority: medium
+    monitoring:
+      - source: library_emitted
+        signal: "hikaricp.connections.usage"
+        detail: "long usage suggests connections held across slow work"
+      - source: oneagent_default
+        signal: "database statement count and response time per request"
+    verification:
+      sources: [manual_review, stage1_dataset]
+      stage1_paths:
+        - "repositories[].fingerprint.dependencies[].name"
+        - "repositories[].reliability_patterns[].pattern"
+      criteria: Configuration files set open-in-view false and do not use ddl-auto create or update for production profiles.
+  - id: SB-008
+    title: Micrometer registry and metric tags configured
+    requirement: Micrometer is configured with a registry for the observability platform (or OTLP), common tags (application, environment, version), and http.server.requests histograms for the SLO percentiles that matter.
+    best_practice: Set management.metrics.tags.*; publish percentiles or histograms selectively; keep tag cardinality bounded.
+    audit_requirement: null
+    priority: medium
+    monitoring:
+      - source: library_emitted
+        signal: "http.server.requests, jvm.*, hikaricp.*, cache.*"
+        detail: "see application instrumentation catalogue"
+    verification:
+      sources: [stage1_dataset]
+      stage1_paths:
+        - "repositories[].telemetry.libraries[].library"
+        - "repositories[].telemetry.libraries[].configuration"
+        - "repositories[].telemetry.libraries[].documented_metrics"
+      criteria: Micrometer is present and management.metrics configuration (registry, tags, distribution) exists.
+  - id: SB-009
+    title: Structured logging and production log levels
+    extends: BASE-LOG-001
+    spring_property: logging.structured.format.console (Spring Boot 3.4 and later)
+    requirement: Logging uses a structured format (built-in structured logging or a JSON encoder), a production root level of INFO, and no DEBUG for security or web packages.
+    best_practice: Use the built-in ecs, gelf or logstash formats or a JSON encoder; include trace and span ids through the tracing bridge.
+    audit_requirement: null
+    priority: medium
+    monitoring:
+      - source: library_emitted
+        signal: "logback.events by level"
+      - source: logs
+        signal: "error and warn volume"
+    verification:
+      sources: [manual_review]
+      criteria: Logging configuration defines a structured encoder and production-safe levels.
