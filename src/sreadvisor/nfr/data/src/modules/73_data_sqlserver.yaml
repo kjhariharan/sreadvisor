@@ -1,0 +1,94 @@
+id: data_sqlserver
+title: Microsoft SQL Server
+layer: tech_stack
+category: data
+description: Microsoft SQL Server requirements, extending the general relational database module.
+extends: [baseline, data_relational]
+detect:
+  - dependency: "mssql|sqlserver|microsoft\\.data\\.sqlclient|system\\.data\\.sqlclient|pyodbc|pymssql|tedious|go-mssqldb"
+  - image: "mssql|sqlserver"
+recognizes: []
+catalogue_refs: [oneagent_default, application_level]
+entry_extensions:
+  sqlserver_feature: "the SQL Server feature or connection string keyword involved"
+entries:
+  - id: MSQ-001
+    title: Availability group listener and multi-subnet failover
+    extends: RDB-005
+    sqlserver_feature: Always On availability groups, MultiSubnetFailover=True
+    requirement: Applications connect to the availability group listener with MultiSubnetFailover enabled and connection retry, so failover completes without long connection stalls.
+    best_practice: Set ConnectRetryCount and interval; use ApplicationIntent=ReadOnly for read scale-out; test planned and unplanned failover.
+    audit_requirement: null
+    priority: high
+    monitoring:
+      - source: platform
+        signal: "availability group synchronisation state and failover events"
+    verification:
+      sources: [stage1_dataset, manual_review]
+      stage1_paths:
+        - "repositories[].encryption_audit.facts[].setting"
+        - "repositories[].encryption_audit.facts[].value"
+      criteria: Connection strings target the listener with failover keywords.
+  - id: MSQ-002
+    title: Encrypted connections with certificate validation
+    extends: ENC-004
+    sqlserver_feature: Encrypt=True, TrustServerCertificate=False
+    requirement: Connection strings require encryption and validate the server certificate (Encrypt true, TrustServerCertificate false), and the server enforces encryption.
+    best_practice: Use current driver defaults (encrypt on by default in recent Microsoft drivers); manage the CA in the trust store.
+    audit_requirement: null
+    priority: high
+    monitoring:
+      - source: platform
+        signal: "sessions by encrypt_option in sys.dm_exec_connections"
+    verification:
+      sources: [stage1_dataset]
+      stage1_paths:
+        - "repositories[].encryption_audit.facts[].status"
+        - "repositories[].secrets.hardcoded[].kind"
+      criteria: Encrypt is true, certificates are validated and no credentials are in the connection string.
+  - id: MSQ-003
+    title: Explicit command timeouts and pool limits
+    extends: BASE-TO-001
+    sqlserver_feature: CommandTimeout, Max Pool Size, Connect Timeout
+    requirement: Command timeout, connect timeout and maximum pool size are set explicitly (the client default command timeout is 30 seconds, and pool default is 100).
+    best_practice: Set command timeout per operation type; size pools to the session budget; keep transactions short.
+    audit_requirement: null
+    priority: high
+    monitoring:
+      - source: oneagent_default
+        signal: "database call response time and failure rate"
+      - source: platform
+        signal: "sessions and blocked processes"
+    verification:
+      sources: [stage1_dataset]
+      stage1_paths:
+        - "repositories[].application_capacity[].key"
+        - "repositories[].application_capacity[].origin"
+      criteria: Timeout and pool settings are explicit.
+  - id: MSQ-004
+    title: Transparent Data Encryption and SQL Server Audit
+    extends: ENC-001
+    sqlserver_feature: TDE, SQL Server Audit
+    requirement: Databases with sensitive data use TDE with managed keys, and SQL Server Audit records logins, privileged actions and access to sensitive tables with retention.
+    best_practice: Back up certificates and keys separately; write audits to a protected location or the platform log service.
+    audit_requirement: Audit files retained per policy.
+    priority: high
+    monitoring:
+      - source: logs
+        signal: "SQL Server Audit events"
+    verification:
+      sources: [manual_review]
+      criteria: TDE and audit specifications are enabled.
+  - id: MSQ-005
+    title: Statistics, indexes and Query Store
+    sqlserver_feature: Query Store, index maintenance
+    requirement: Query Store is enabled, index and statistics maintenance is scheduled, and plan regressions and blocking are monitored.
+    best_practice: Use automatic tuning where appropriate; alert on long blocking chains and tempdb contention.
+    audit_requirement: null
+    priority: medium
+    monitoring:
+      - source: platform
+        signal: "Query Store regressions, blocking and tempdb usage"
+    verification:
+      sources: [manual_review]
+      criteria: Query Store and maintenance jobs are active.

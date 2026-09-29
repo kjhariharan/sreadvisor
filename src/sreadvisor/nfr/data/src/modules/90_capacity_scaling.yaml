@@ -1,0 +1,227 @@
+id: capacity_scaling
+title: Capacity and scaling
+layer: cross_cutting
+category: cross_cutting
+description: >-
+  Capacity posture across the infrastructure layer (requests and limits, autoscaling, replicas, disruption budgets)
+  and the application layer (connection pools, thread pools, rate limiters). Evaluated against the Stage 1
+  infrastructure analysis and the application capacity settings from code analysis.
+detect:
+  - always: true
+recognizes: []
+catalogue_refs: [oneagent_default, application_level]
+entry_extensions:
+  layer: "infrastructure | application | cross_layer: which layer's Stage 1 data is evaluated"
+  explicit_setting_required: "true when the requirement is that a value is set explicitly rather than left at a framework default"
+entries:
+  - id: CAP-001
+    title: Resource requests and limits defined for every container
+    layer: infrastructure
+    requirement: Every container declares CPU and memory requests and a memory limit (and a CPU limit or a documented decision not to set one).
+    best_practice: >-
+      Requests reflect steady-state usage (they drive scheduling and autoscaling); memory limit above the working set with
+      headroom; memory request equal to the limit for predictable eviction behaviour; a CPU limit only where throttling is understood.
+    audit_requirement: Resource sizing decisions are recorded with the load test or production usage that justified them.
+    priority: critical
+    monitoring:
+      - source: platform
+        signal: "container CPU and memory usage against requests and limits"
+      - source: oneagent_default
+        signal: "process CPU usage and working-set memory"
+    verification:
+      sources: [stage1_dataset]
+      stage1_paths:
+        - "infrastructure.workloads[].containers[].requests"
+        - "infrastructure.workloads[].containers[].limits"
+        - "infrastructure.capacity[].category"
+        - "infrastructure.compose_services[].limits"
+      criteria: Every container of every workload has non-empty requests and limits for cpu and memory; containers with neither are a finding.
+  - id: CAP-002
+    title: Autoscaling configured with sensible thresholds
+    layer: infrastructure
+    requirement: Variable-load workloads have horizontal autoscaling with a minimum of at least two replicas, a maximum that bounds cost and downstream load, and a utilisation target with headroom.
+    best_practice: >-
+      Scale on a metric that tracks load (CPU, requests per second, queue depth) at a target that leaves headroom (commonly 50 to 70 percent CPU);
+      set scale-down stabilisation to avoid flapping; make sure requests are set, because utilisation targets are relative to requests.
+    audit_requirement: Autoscaling limits and targets are reviewed alongside capacity tests.
+    priority: high
+    monitoring:
+      - source: platform
+        signal: "desired versus current replicas and scaling events"
+      - source: oneagent_default
+        signal: "request rate and response time during scale events"
+    verification:
+      sources: [stage1_dataset, runtime_telemetry]
+      stage1_paths:
+        - "infrastructure.autoscalers[].kind"
+        - "infrastructure.autoscalers[].min_replicas"
+        - "infrastructure.autoscalers[].max_replicas"
+        - "infrastructure.autoscalers[].metrics"
+        - "infrastructure.autoscalers[].target"
+      criteria: >-
+        An autoscaler targets each variable-load workload, min_replicas is at least 2, max_replicas is bounded, and a metric with
+        a target value is defined. Where replica-count telemetry is available, a policy never observed triggering (replica count
+        constant throughout the window) is a finding distinct from the config being present at all.
+  - id: CAP-003
+    title: Replica count gives redundancy, not a single point of failure
+    layer: infrastructure
+    requirement: Every production workload runs at least two replicas spread across failure domains.
+    best_practice: Use pod anti-affinity or topology spread constraints across nodes and zones; never rely on a single replica for a user-facing service; size N+1 for node loss.
+    audit_requirement: Redundancy level is stated in the service's availability target.
+    priority: critical
+    monitoring:
+      - source: platform
+        signal: "ready replicas versus desired, per zone"
+      - source: oneagent_default
+        signal: "process availability per instance"
+    verification:
+      sources: [stage1_dataset]
+      stage1_paths:
+        - "infrastructure.workloads[].replicas"
+        - "infrastructure.workloads[].has_pod_anti_affinity"
+        - "infrastructure.workloads[].has_topology_spread"
+        - "infrastructure.autoscalers[].min_replicas"
+        - "infrastructure.compose_services[].replicas"
+      criteria: Each workload has replicas (or autoscaler min_replicas) of at least 2; a single replica, or replicas with no anti-affinity or topology spread, is a finding.
+  - id: CAP-004
+    title: Pod disruption budget protects multi-replica workloads
+    layer: infrastructure
+    requirement: Workloads with more than one replica have a PodDisruptionBudget that keeps a minimum number available during voluntary disruptions (node drains, upgrades).
+    best_practice: Set minAvailable or maxUnavailable so a drain cannot remove all replicas; do not set a budget that blocks all disruptions permanently.
+    audit_requirement: null
+    priority: medium
+    monitoring:
+      - source: platform
+        signal: "allowed disruptions on the budget"
+    verification:
+      sources: [stage1_dataset]
+      stage1_paths:
+        - "infrastructure.disruption_budgets[].selector"
+        - "infrastructure.disruption_budgets[].min_available"
+        - "infrastructure.disruption_budgets[].max_unavailable"
+        - "infrastructure.workloads[].replicas"
+      criteria: Every workload with two or more replicas is selected by a PodDisruptionBudget.
+  - id: CAP-005
+    title: Database connection pool size set explicitly
+    layer: application
+    explicit_setting_required: true
+    requirement: The maximum connection pool size, minimum idle, connection timeout and max lifetime are set explicitly in application configuration rather than left at framework defaults.
+    best_practice: >-
+      Size the pool from the database's connection budget divided by the replica count at maximum scale, not from thread counts;
+      set an acquisition timeout that fails fast; keep max lifetime below the database or proxy idle timeout.
+    audit_requirement: null
+    priority: high
+    monitoring:
+      - source: library_emitted
+        signal: "pool active, idle, pending and timeout counters"
+        detail: "e.g. hikaricp.connections.*"
+      - source: oneagent_default
+        signal: "database call response time and failure rate from the calling service"
+    verification:
+      sources: [stage1_dataset]
+      stage1_paths:
+        - "repositories[].application_capacity[].category"
+        - "repositories[].application_capacity[].key"
+        - "repositories[].application_capacity[].value"
+        - "repositories[].application_capacity[].origin"
+        - "capacity_posture.application[].origin"
+      criteria: For each datastore dependency there is a db_pool capacity setting with origin explicit; origin framework_default is a finding.
+  - id: CAP-006
+    title: Thread pools and executors configured explicitly
+    layer: application
+    explicit_setting_required: true
+    requirement: Server request threads, async executors and scheduler pools have explicit sizes and bounded queues.
+    best_practice: Bound queues and choose a rejection policy; isolate blocking work on its own pool; keep total threads consistent with the container CPU limit.
+    audit_requirement: null
+    priority: high
+    monitoring:
+      - source: library_emitted
+        signal: "executor active, queued and rejected counts"
+        detail: "e.g. tomcat.threads.busy, executor.active, executor.queued"
+      - source: oneagent_default
+        signal: "JVM or runtime thread count"
+    verification:
+      sources: [stage1_dataset]
+      stage1_paths:
+        - "repositories[].application_capacity[].category"
+        - "repositories[].application_capacity[].key"
+        - "repositories[].application_capacity[].origin"
+      criteria: thread_pool and server_connections capacity settings exist with origin explicit; only framework defaults is a finding.
+  - id: CAP-007
+    title: Rate limits and backpressure thresholds set for inbound and outbound traffic
+    layer: application
+    explicit_setting_required: true
+    requirement: Entry points exposed to untrusted or bursty callers have a rate limit (in the application, gateway or mesh), and calls to constrained dependencies are limited by a rate limiter or bulkhead.
+    best_practice: Limit per client and per route; return 429 with Retry-After; shed load before saturation; protect downstream dependencies with concurrency limits.
+    audit_requirement: null
+    priority: medium
+    monitoring:
+      - source: library_emitted
+        signal: "permitted versus rejected calls"
+        detail: "e.g. resilience4j.ratelimiter.*, bulkhead.*"
+      - source: oneagent_default
+        signal: "HTTP 429 and 503 response rate"
+    verification:
+      sources: [stage1_dataset]
+      stage1_paths:
+        - "repositories[].application_capacity[].category"
+        - "repositories[].reliability_patterns[].pattern"
+        - "infrastructure.mesh.traffic_policies[].kind"
+      criteria: A rate_limiter capacity setting or rate_limiter/bulkhead pattern exists for public entry points, or a gateway or mesh limit is configured.
+  - id: CAP-008
+    title: Application limits consistent with infrastructure limits
+    layer: cross_layer
+    requirement: Application pool and thread settings fit inside the container limits and the aggregate load they can place on shared dependencies at maximum replicas.
+    best_practice: >-
+      Check pool size times maximum replicas against the database connection limit; keep JVM heap below the container memory limit with
+      headroom for non-heap memory; keep worker threads consistent with the CPU request.
+    audit_requirement: Capacity model (per-replica limits and dependency budgets) is kept with the service documentation.
+    priority: high
+    monitoring:
+      - source: library_emitted
+        signal: "pool utilisation across replicas"
+      - source: platform
+        signal: "container memory working set against the limit"
+    verification:
+      sources: [stage1_dataset, manual_review]
+      stage1_paths:
+        - "capacity_posture.application[].key"
+        - "capacity_posture.application[].value"
+        - "capacity_posture.infrastructure[].key"
+        - "capacity_posture.infrastructure[].value"
+        - "infrastructure.autoscalers[].max_replicas"
+      criteria: >-
+        db_pool size multiplied by the maximum replica count does not exceed the datastore's connection limit, and configured
+        heap or memory settings are below the container memory limit.
+  - id: CAP-009
+    title: Termination grace period covers connection draining
+    layer: infrastructure
+    requirement: terminationGracePeriodSeconds is set explicitly and is longer than the application's drain time.
+    best_practice: Pair with a preStop delay and application graceful shutdown; avoid the 30 second default when in-flight work can run longer.
+    audit_requirement: null
+    priority: low
+    monitoring:
+      - source: platform
+        signal: "pods killed with SIGKILL after grace period expiry"
+    verification:
+      sources: [stage1_dataset]
+      stage1_paths:
+        - "infrastructure.workloads[].termination_grace_period_seconds"
+      criteria: termination_grace_period_seconds is present for each workload.
+  - id: CAP-010
+    title: Rollout capacity headroom
+    layer: infrastructure
+    requirement: Rolling update parameters (maxSurge, maxUnavailable) keep enough capacity serving during a rollout.
+    best_practice: Use maxUnavailable 0 (or a small fraction) with maxSurge above 0 for user-facing services so capacity never drops during a deploy.
+    audit_requirement: null
+    priority: medium
+    monitoring:
+      - source: platform
+        signal: "available replicas during rollout"
+    verification:
+      sources: [stage1_dataset]
+      stage1_paths:
+        - "infrastructure.workloads[].strategy"
+        - "infrastructure.workloads[].max_surge"
+        - "infrastructure.workloads[].max_unavailable"
+      criteria: Rolling strategy workloads set max_unavailable low enough that capacity is preserved; Recreate on a user-facing workload is a finding.

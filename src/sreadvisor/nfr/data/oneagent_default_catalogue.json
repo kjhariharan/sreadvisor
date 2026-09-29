@@ -1,0 +1,1124 @@
+{
+  "kb_schema_version": "1.0",
+  "tier": "oneagent_default",
+  "coverage": "default_out_of_the_box",
+  "description": "Tier 1 telemetry: what Dynatrace OneAgent captures out of the box with default, zero-configuration monitoring, organised by the same tech-stack modules as the Master NFR List. Everything in this file is tagged default or out-of-the-box coverage. It is deliberately separate from the application-level instrumentation catalogue (tier 2): the two must not be assumed to overlap. Stage 4's dashboard generator uses it to show default metrics as the base dashboard and to offer only the gaps (see each module's not_covered_by_default) as additions, so nothing OneAgent already provides is rebuilt.",
+  "provenance": "Curated from Dynatrace documentation as understood at authoring time; not generated from a live tenant. metric_key values are the Dynatrace built-in metric keys where one is known and are null where the signal is a trace, topology or event, or where the key is not certain. Entries marked confidence medium reflect technology-specific sensor behaviour that depends on the OneAgent version. Stage 4 must validate every key and signal against the target tenant (Metrics API and the technology support matrix) before a dashboard is generated.",
+  "modules": {
+    "oneagent_platform": {
+      "support_level": "full",
+      "summary": "Host, process, container and topology monitoring that OneAgent provides for any monitored host regardless of technology.",
+      "inherits": [],
+      "signals": [
+        {
+          "id": "oa.platform.host.cpu",
+          "name": "Host CPU usage",
+          "category": "resources",
+          "signal_type": "metric",
+          "metric_key": "builtin:host.cpu.usage",
+          "description": "CPU utilisation of the monitored host.",
+          "confidence": "high"
+        },
+        {
+          "id": "oa.platform.host.memory",
+          "name": "Host memory usage",
+          "category": "resources",
+          "signal_type": "metric",
+          "metric_key": "builtin:host.mem.usage",
+          "description": "Memory utilisation of the monitored host.",
+          "confidence": "high"
+        },
+        {
+          "id": "oa.platform.host.disk",
+          "name": "Host disk usage",
+          "category": "resources",
+          "signal_type": "metric",
+          "metric_key": "builtin:host.disk.usedPct",
+          "description": "Used disk space per mount.",
+          "confidence": "high"
+        },
+        {
+          "id": "oa.platform.host.network",
+          "name": "Host network traffic",
+          "category": "resources",
+          "signal_type": "metric",
+          "metric_key": "builtin:host.net.nic.trafficIn",
+          "description": "Network traffic in and out per interface (companion metric for traffic out).",
+          "confidence": "high"
+        },
+        {
+          "id": "oa.platform.process.cpu",
+          "name": "Process CPU usage",
+          "category": "resources",
+          "signal_type": "metric",
+          "metric_key": "builtin:tech.generic.cpu.usage",
+          "description": "CPU usage of each monitored process.",
+          "confidence": "high"
+        },
+        {
+          "id": "oa.platform.process.memory",
+          "name": "Process memory (working set)",
+          "category": "resources",
+          "signal_type": "metric",
+          "metric_key": "builtin:tech.generic.mem.workingSetSize",
+          "description": "Resident memory of each monitored process.",
+          "confidence": "high"
+        },
+        {
+          "id": "oa.platform.process.availability",
+          "name": "Process availability and restarts",
+          "category": "availability",
+          "signal_type": "event",
+          "description": "Detection of process start, stop and crash, with availability of the process group.",
+          "confidence": "high"
+        },
+        {
+          "id": "oa.platform.topology",
+          "name": "Automatic topology (Smartscape)",
+          "category": "topology",
+          "signal_type": "topology",
+          "description": "Discovery of hosts, processes, services and the network connections between them without configuration.",
+          "confidence": "high"
+        },
+        {
+          "id": "oa.platform.problems",
+          "name": "Automatic anomaly detection and problem grouping",
+          "category": "availability",
+          "signal_type": "event",
+          "description": "Davis anomaly detection on default service and host metrics with problem correlation across the topology.",
+          "confidence": "high"
+        },
+        {
+          "id": "oa.platform.container",
+          "name": "Container CPU and memory",
+          "category": "resources",
+          "signal_type": "metric",
+          "description": "Container-level resource usage for containerised processes on monitored hosts.",
+          "confidence": "medium"
+        }
+      ],
+      "not_covered_by_default": [
+        {
+          "signal": "Application log ingestion and analysis",
+          "why": "Log ingestion is an opt-in configuration (log sources and storage) rather than automatic.",
+          "likely_source": "other_integration"
+        },
+        {
+          "signal": "Business metrics such as orders placed or payments authorised",
+          "why": "OneAgent has no knowledge of business meaning.",
+          "likely_source": "custom_instrumentation"
+        }
+      ]
+    },
+    "oneagent_service_layer": {
+      "support_level": "full",
+      "summary": "Service-level request telemetry captured automatically for technologies that have a OneAgent code module (Java, Node.js, Python, Go, .NET, PHP and others). Applies to any module that inherits it.",
+      "inherits": [
+        "oneagent_platform"
+      ],
+      "signals": [
+        {
+          "id": "oa.service.request_count",
+          "name": "Request count",
+          "category": "throughput",
+          "signal_type": "metric",
+          "metric_key": "builtin:service.requestCount.total",
+          "description": "Requests handled per service.",
+          "confidence": "high"
+        },
+        {
+          "id": "oa.service.response_time",
+          "name": "Response time",
+          "category": "latency",
+          "signal_type": "metric",
+          "metric_key": "builtin:service.response.time",
+          "description": "Response time per service with percentiles available.",
+          "confidence": "high"
+        },
+        {
+          "id": "oa.service.failure_rate",
+          "name": "Failure rate",
+          "category": "errors",
+          "signal_type": "metric",
+          "metric_key": "builtin:service.errors.total.rate",
+          "description": "Share of requests that failed (HTTP 5xx, uncaught exceptions and detected failures).",
+          "confidence": "high"
+        },
+        {
+          "id": "oa.service.http_errors",
+          "name": "HTTP server and client error rates",
+          "category": "errors",
+          "signal_type": "metric",
+          "metric_key": "builtin:service.errors.server.rate",
+          "description": "Server (5xx) error rate with a companion client (4xx) error rate.",
+          "confidence": "high"
+        },
+        {
+          "id": "oa.service.cpu_time",
+          "name": "CPU time per request",
+          "category": "resources",
+          "signal_type": "metric",
+          "metric_key": "builtin:service.cpu.time",
+          "description": "CPU time consumed by request processing.",
+          "confidence": "high"
+        },
+        {
+          "id": "oa.service.traces",
+          "name": "Distributed traces (PurePath)",
+          "category": "tracing",
+          "signal_type": "trace",
+          "description": "End-to-end traces of every transaction with code-level timing, propagated across monitored services.",
+          "confidence": "high"
+        },
+        {
+          "id": "oa.service.service_flow",
+          "name": "Service flow and outbound call breakdown",
+          "category": "topology",
+          "signal_type": "topology",
+          "description": "Calls from a service to the services, databases and external endpoints it uses, with time contribution.",
+          "confidence": "high"
+        },
+        {
+          "id": "oa.service.exceptions",
+          "name": "Exception capture",
+          "category": "errors",
+          "signal_type": "event",
+          "description": "Exceptions and error details attached to traces of failed requests.",
+          "confidence": "high"
+        },
+        {
+          "id": "oa.service.database_calls",
+          "name": "Database call visibility",
+          "category": "database",
+          "signal_type": "trace",
+          "description": "Database statements, call count and time per request for supported drivers, with the database shown as a service.",
+          "confidence": "medium"
+        }
+      ],
+      "not_covered_by_default": [
+        {
+          "signal": "Key request tracking and business-critical request naming",
+          "why": "Key requests and request naming rules are configured per service.",
+          "likely_source": "custom_instrumentation"
+        },
+        {
+          "signal": "Request attributes such as customer id or order id",
+          "why": "Capturing business values from requests requires configuration.",
+          "likely_source": "custom_instrumentation"
+        },
+        {
+          "signal": "Metrics emitted by application libraries (Micrometer, OpenTelemetry, client library metrics)",
+          "why": "OneAgent does not automatically read a library's own meter registry; these are the application-level tier.",
+          "likely_source": "library_emitted"
+        }
+      ]
+    },
+    "lang_java": {
+      "support_level": "full",
+      "summary": "JVM runtime and code-level visibility from the OneAgent Java sensor.",
+      "inherits": [
+        "oneagent_platform",
+        "oneagent_service_layer"
+      ],
+      "signals": [
+        {
+          "id": "oa.java.memory_pools",
+          "name": "JVM memory pool usage",
+          "category": "runtime",
+          "signal_type": "metric",
+          "metric_key": "builtin:tech.jvm.memory.pool.used",
+          "description": "Used, committed and maximum memory per pool (heap generations, metaspace).",
+          "confidence": "high"
+        },
+        {
+          "id": "oa.java.gc_time",
+          "name": "Garbage collection time and count",
+          "category": "runtime",
+          "signal_type": "metric",
+          "metric_key": "builtin:tech.jvm.memory.gc.collectionTime",
+          "description": "Time spent in and number of garbage collections, per collector.",
+          "confidence": "high"
+        },
+        {
+          "id": "oa.java.gc_suspension",
+          "name": "GC suspension time",
+          "category": "runtime",
+          "signal_type": "metric",
+          "metric_key": "builtin:tech.jvm.memory.gc.suspensionTime",
+          "description": "Time application threads were suspended by garbage collection.",
+          "confidence": "high"
+        },
+        {
+          "id": "oa.java.threads",
+          "name": "JVM thread count",
+          "category": "runtime",
+          "signal_type": "metric",
+          "metric_key": "builtin:tech.jvm.threads.count",
+          "description": "Number of live threads in the JVM.",
+          "confidence": "high"
+        },
+        {
+          "id": "oa.java.classes",
+          "name": "Loaded classes",
+          "category": "runtime",
+          "signal_type": "metric",
+          "metric_key": "builtin:tech.jvm.classes.loaded",
+          "description": "Number of classes currently loaded.",
+          "confidence": "high"
+        },
+        {
+          "id": "oa.java.jdbc",
+          "name": "JDBC database calls",
+          "category": "database",
+          "signal_type": "trace",
+          "description": "JDBC statements and connection failures per request with the database detected as a service.",
+          "confidence": "high"
+        },
+        {
+          "id": "oa.java.http_clients",
+          "name": "Outbound HTTP client calls",
+          "category": "topology",
+          "signal_type": "trace",
+          "description": "Calls through common Java HTTP clients (HttpURLConnection, Apache HttpClient, OkHttp, Java 11 HttpClient) traced to their target services.",
+          "confidence": "high"
+        }
+      ],
+      "not_covered_by_default": [
+        {
+          "signal": "Connection pool utilisation (active, idle, pending, timeouts)",
+          "why": "Pool internals are exposed by the pool library's own metrics (HikariCP, Agroal, DBCP).",
+          "likely_source": "library_emitted"
+        },
+        {
+          "signal": "Executor and thread pool queue depth and rejected tasks",
+          "why": "Application executors are not visible beyond total thread count.",
+          "likely_source": "library_emitted"
+        },
+        {
+          "signal": "Cache hit ratio and cache size",
+          "why": "In-process caches report through their own statistics.",
+          "likely_source": "library_emitted"
+        },
+        {
+          "signal": "Circuit breaker state and retry counts",
+          "why": "Resilience library state is emitted by the library, not inferred from traces.",
+          "likely_source": "library_emitted"
+        }
+      ]
+    },
+    "spring_boot": {
+      "support_level": "full",
+      "summary": "Spring MVC, WebFlux and Spring Data traffic is detected through the Java sensor; Spring-specific health and library metrics are not part of default monitoring.",
+      "inherits": [
+        "lang_java"
+      ],
+      "signals": [
+        {
+          "id": "oa.spring.web_requests",
+          "name": "Spring MVC and WebFlux request services",
+          "category": "throughput",
+          "signal_type": "metric",
+          "description": "Web requests handled by Spring controllers are detected as a service with request count, response time and failure rate, with requests named by mapped route.",
+          "confidence": "medium"
+        },
+        {
+          "id": "oa.spring.rest_clients",
+          "name": "RestTemplate, RestClient and WebClient outbound calls",
+          "category": "topology",
+          "signal_type": "trace",
+          "description": "Outbound calls through Spring's HTTP clients traced to their target services.",
+          "confidence": "medium"
+        },
+        {
+          "id": "oa.spring.data",
+          "name": "Spring Data and JPA statement visibility",
+          "category": "database",
+          "signal_type": "trace",
+          "description": "Statements issued through JPA and Hibernate appear as database calls in traces via the JDBC driver.",
+          "confidence": "medium"
+        },
+        {
+          "id": "oa.spring.messaging",
+          "name": "Spring Kafka and JMS messaging spans",
+          "category": "messaging",
+          "signal_type": "trace",
+          "description": "Producer and consumer spans for Spring messaging clients with context propagation.",
+          "confidence": "medium"
+        }
+      ],
+      "not_covered_by_default": [
+        {
+          "signal": "Actuator health status and health group state",
+          "why": "Health endpoint results are application state, not captured automatically.",
+          "likely_source": "library_emitted"
+        },
+        {
+          "signal": "Micrometer meters (http.server.requests histograms, hikaricp.*, cache.*, executor.*, tomcat.*)",
+          "why": "Micrometer is the application-level tier and needs a registry or metric ingest path.",
+          "likely_source": "library_emitted"
+        },
+        {
+          "signal": "Spring Security authentication events",
+          "why": "Security events are emitted by the application, not observed automatically.",
+          "likely_source": "custom_instrumentation"
+        }
+      ]
+    },
+    "quarkus": {
+      "support_level": "partial",
+      "summary": "Quarkus runs on the JVM (or as a native image) and is monitored through the Java sensor in JVM mode; native images have reduced code-level visibility.",
+      "inherits": [
+        "lang_java"
+      ],
+      "signals": [
+        {
+          "id": "oa.quarkus.http",
+          "name": "RESTEasy and Vert.x HTTP request services",
+          "category": "throughput",
+          "signal_type": "metric",
+          "description": "HTTP requests handled by Quarkus are detected as services with standard request metrics in JVM mode.",
+          "confidence": "medium"
+        }
+      ],
+      "not_covered_by_default": [
+        {
+          "signal": "SmallRye Health and Micrometer or SmallRye Metrics meters",
+          "why": "Extension-provided metrics are library emitted.",
+          "likely_source": "library_emitted"
+        },
+        {
+          "signal": "Agroal datasource pool metrics",
+          "why": "Pool internals are library emitted.",
+          "likely_source": "library_emitted"
+        },
+        {
+          "signal": "Code-level visibility for native-image builds",
+          "why": "Native executables have no JVM to instrument; use OpenTelemetry.",
+          "likely_source": "library_emitted"
+        }
+      ]
+    },
+    "lang_python": {
+      "support_level": "partial",
+      "summary": "Python sensor with service and trace detection for supported frameworks; runtime internals are limited.",
+      "inherits": [
+        "oneagent_platform",
+        "oneagent_service_layer"
+      ],
+      "signals": [
+        {
+          "id": "oa.python.frameworks",
+          "name": "Web framework request detection",
+          "category": "throughput",
+          "signal_type": "metric",
+          "description": "Requests handled by supported frameworks (for example Django, Flask, FastAPI) appear as services with request metrics and traces.",
+          "confidence": "medium"
+        },
+        {
+          "id": "oa.python.outbound",
+          "name": "Outbound HTTP and database client calls",
+          "category": "topology",
+          "signal_type": "trace",
+          "description": "Calls through common HTTP clients and DB-API drivers traced to their targets.",
+          "confidence": "medium"
+        }
+      ],
+      "not_covered_by_default": [
+        {
+          "signal": "Interpreter internals (garbage collector, thread and event-loop details)",
+          "why": "Limited runtime metrics for Python; use prometheus_client or OpenTelemetry.",
+          "likely_source": "library_emitted"
+        },
+        {
+          "signal": "Celery or worker queue depth",
+          "why": "Queue metrics come from the broker or Celery instrumentation.",
+          "likely_source": "library_emitted"
+        }
+      ]
+    },
+    "lang_javascript_typescript": {
+      "support_level": "full",
+      "summary": "Node.js sensor with request tracing and V8 runtime metrics (TypeScript is monitored as the JavaScript it compiles to).",
+      "inherits": [
+        "oneagent_platform",
+        "oneagent_service_layer"
+      ],
+      "signals": [
+        {
+          "id": "oa.node.event_loop",
+          "name": "Event loop latency",
+          "category": "runtime",
+          "signal_type": "metric",
+          "description": "Event loop tick latency and frequency for Node.js processes.",
+          "confidence": "medium"
+        },
+        {
+          "id": "oa.node.v8_heap",
+          "name": "V8 heap and garbage collection",
+          "category": "runtime",
+          "signal_type": "metric",
+          "description": "V8 heap usage and GC activity per Node.js process.",
+          "confidence": "medium"
+        },
+        {
+          "id": "oa.node.http",
+          "name": "HTTP framework request detection",
+          "category": "throughput",
+          "signal_type": "metric",
+          "description": "Requests handled by Express, NestJS and other Node.js HTTP servers appear as services with traces.",
+          "confidence": "medium"
+        }
+      ],
+      "not_covered_by_default": [
+        {
+          "signal": "Custom counters and gauges from prom-client or OpenTelemetry",
+          "why": "Library metrics are application-level.",
+          "likely_source": "library_emitted"
+        },
+        {
+          "signal": "Queue depth for BullMQ or similar job queues",
+          "why": "Queue metrics are emitted by the queue library or Redis.",
+          "likely_source": "library_emitted"
+        }
+      ]
+    },
+    "lang_go": {
+      "support_level": "partial",
+      "summary": "Go monitoring covers standard library HTTP and selected libraries; coverage depends on how the binary is built and on the OneAgent version.",
+      "inherits": [
+        "oneagent_platform",
+        "oneagent_service_layer"
+      ],
+      "signals": [
+        {
+          "id": "oa.go.requests",
+          "name": "net/http request detection",
+          "category": "throughput",
+          "signal_type": "metric",
+          "description": "Requests through the standard library HTTP server and client appear as services and traces where the Go sensor is active.",
+          "confidence": "medium"
+        },
+        {
+          "id": "oa.go.runtime",
+          "name": "Go runtime metrics (goroutines, GC, memory)",
+          "category": "runtime",
+          "signal_type": "metric",
+          "description": "Goroutine count, garbage collection and memory statistics where the Go sensor is active.",
+          "confidence": "medium"
+        }
+      ],
+      "not_covered_by_default": [
+        {
+          "signal": "Framework-level routing detail and custom spans",
+          "why": "Third-party frameworks need OpenTelemetry instrumentation.",
+          "likely_source": "library_emitted"
+        },
+        {
+          "signal": "Statically linked or stripped binaries without the Go sensor",
+          "why": "The Go sensor requires compatible builds; otherwise only host and process metrics exist.",
+          "likely_source": "library_emitted"
+        }
+      ]
+    },
+    "lang_rust": {
+      "support_level": "none",
+      "summary": "OneAgent has no code-level sensor for Rust. Only host and process metrics of the container apply; traces and application metrics must come from OpenTelemetry.",
+      "inherits": [
+        "oneagent_platform"
+      ],
+      "signals": [],
+      "not_covered_by_default": [
+        {
+          "signal": "Request rate, response time and failure rate",
+          "why": "No service detection for Rust processes.",
+          "likely_source": "library_emitted"
+        },
+        {
+          "signal": "Distributed traces",
+          "why": "No automatic instrumentation; export OTLP traces.",
+          "likely_source": "library_emitted"
+        }
+      ]
+    },
+    "microservices_architecture": {
+      "support_level": "full",
+      "summary": "Automatic topology and distributed tracing across monitored services.",
+      "inherits": [
+        "oneagent_platform",
+        "oneagent_service_layer"
+      ],
+      "signals": [
+        {
+          "id": "oa.msa.service_topology",
+          "name": "Service-to-service dependency map",
+          "category": "topology",
+          "signal_type": "topology",
+          "description": "Automatic map of which services call which, with request volume and failure rate on each edge.",
+          "confidence": "high"
+        },
+        {
+          "id": "oa.msa.root_cause",
+          "name": "Cross-service root-cause analysis",
+          "category": "availability",
+          "signal_type": "event",
+          "description": "Problems are correlated along the dependency chain to a probable root cause.",
+          "confidence": "high"
+        }
+      ],
+      "not_covered_by_default": [
+        {
+          "signal": "API contract version usage",
+          "why": "Version usage is business information in the request.",
+          "likely_source": "custom_instrumentation"
+        },
+        {
+          "signal": "Business-flow level success rates across services",
+          "why": "Not derivable without business keys.",
+          "likely_source": "custom_instrumentation"
+        }
+      ]
+    },
+    "event_driven_messaging": {
+      "support_level": "partial",
+      "summary": "Producer and consumer calls for supported messaging clients are traced with context propagation; broker and consumer-group internals are not default.",
+      "inherits": [
+        "oneagent_platform",
+        "oneagent_service_layer"
+      ],
+      "signals": [
+        {
+          "id": "oa.msg.spans",
+          "name": "Message send and receive spans",
+          "category": "messaging",
+          "signal_type": "trace",
+          "description": "Publish and consume operations for supported clients (Kafka, RabbitMQ, JMS, cloud queues) appear in traces with message headers propagating trace context.",
+          "confidence": "medium"
+        },
+        {
+          "id": "oa.msg.services",
+          "name": "Messaging destinations as services",
+          "category": "messaging",
+          "signal_type": "metric",
+          "description": "Topics and queues appear as messaging services with send and receive counts and processing time.",
+          "confidence": "medium"
+        }
+      ],
+      "not_covered_by_default": [
+        {
+          "signal": "Consumer lag and time-behind-latest per consumer group",
+          "why": "Lag is a broker offset measure, reported by the Kafka client metrics or broker monitoring.",
+          "likely_source": "library_emitted"
+        },
+        {
+          "signal": "Dead-letter queue depth and oldest message age",
+          "why": "Broker-side measurement.",
+          "likely_source": "other_integration"
+        },
+        {
+          "signal": "Rebalance frequency and commit latency",
+          "why": "Client library metrics.",
+          "likely_source": "library_emitted"
+        }
+      ]
+    },
+    "spring_boot_kafka": {
+      "support_level": "partial",
+      "summary": "Kafka producer and consumer operations from Spring for Apache Kafka are traced; Kafka client health metrics are application-level.",
+      "inherits": [
+        "spring_boot",
+        "event_driven_messaging"
+      ],
+      "signals": [],
+      "not_covered_by_default": [
+        {
+          "signal": "Consumer lag (records-lag-max)",
+          "why": "Reported by the Kafka consumer client metrics through Micrometer or JMX.",
+          "likely_source": "library_emitted"
+        },
+        {
+          "signal": "Records consumed per poll and fetch latency",
+          "why": "Kafka client metrics.",
+          "likely_source": "library_emitted"
+        },
+        {
+          "signal": "Commit latency and commit rate",
+          "why": "Kafka client metrics.",
+          "likely_source": "library_emitted"
+        },
+        {
+          "signal": "Retry topic and dead letter topic publish counts",
+          "why": "Application-level counters unless read from the broker.",
+          "likely_source": "custom_instrumentation"
+        }
+      ]
+    },
+    "oauth2_identity": {
+      "support_level": "limited",
+      "summary": "The token endpoint and identity provider appear as ordinary outbound service calls; nothing specific to OAuth2 is captured.",
+      "inherits": [
+        "oneagent_service_layer"
+      ],
+      "signals": [],
+      "not_covered_by_default": [
+        {
+          "signal": "Token refresh success and failure counts",
+          "why": "Application-level event.",
+          "likely_source": "custom_instrumentation"
+        },
+        {
+          "signal": "Authentication failures by reason (invalid_token, expired, wrong audience)",
+          "why": "Reason is inside the application.",
+          "likely_source": "custom_instrumentation"
+        }
+      ]
+    },
+    "jwt_authentication": {
+      "support_level": "limited",
+      "summary": "Only the resulting 401 and 403 response rates are visible through service metrics.",
+      "inherits": [
+        "oneagent_service_layer"
+      ],
+      "signals": [],
+      "not_covered_by_default": [
+        {
+          "signal": "Rejected tokens by reason",
+          "why": "Validation outcomes are application internals.",
+          "likely_source": "custom_instrumentation"
+        },
+        {
+          "signal": "Signing key age and unknown key id events",
+          "why": "Key lifecycle is external to OneAgent.",
+          "likely_source": "other_integration"
+        }
+      ]
+    },
+    "zero_trust": {
+      "support_level": "limited",
+      "summary": "OneAgent shows service topology and traffic but does not observe mTLS enforcement or policy decisions.",
+      "inherits": [
+        "oneagent_platform"
+      ],
+      "signals": [],
+      "not_covered_by_default": [
+        {
+          "signal": "mTLS coverage and denied connections",
+          "why": "Enforced and reported by the mesh or network layer.",
+          "likely_source": "other_integration"
+        },
+        {
+          "signal": "Authorisation decisions per principal",
+          "why": "Reported by policy engines and application logs.",
+          "likely_source": "other_integration"
+        }
+      ]
+    },
+    "source_github": {
+      "support_level": "none",
+      "summary": "OneAgent does not monitor source control.",
+      "inherits": [],
+      "signals": [],
+      "not_covered_by_default": [
+        {
+          "signal": "Pull request, review and workflow run telemetry",
+          "why": "Not part of runtime monitoring.",
+          "likely_source": "other_integration"
+        }
+      ]
+    },
+    "cicd_harness": {
+      "support_level": "none",
+      "summary": "OneAgent does not monitor pipelines. Deployment events must be sent to Dynatrace explicitly by the pipeline.",
+      "inherits": [],
+      "signals": [],
+      "not_covered_by_default": [
+        {
+          "signal": "Deployment events and release markers",
+          "why": "Sent through the events API from the pipeline.",
+          "likely_source": "other_integration"
+        },
+        {
+          "signal": "Pipeline duration and failure rate",
+          "why": "Reported by Harness.",
+          "likely_source": "other_integration"
+        }
+      ]
+    },
+    "cicd_ucd": {
+      "support_level": "none",
+      "summary": "OneAgent does not monitor UrbanCode Deploy. Deployment events must be sent explicitly.",
+      "inherits": [],
+      "signals": [],
+      "not_covered_by_default": [
+        {
+          "signal": "Deployment events and release markers",
+          "why": "Sent through the events API from the process.",
+          "likely_source": "other_integration"
+        }
+      ]
+    },
+    "iac_terraform": {
+      "support_level": "none",
+      "summary": "Infrastructure as code is not a runtime; nothing is monitored by OneAgent.",
+      "inherits": [],
+      "signals": [],
+      "not_covered_by_default": [
+        {
+          "signal": "Drift and apply status",
+          "why": "Reported by the IaC pipeline.",
+          "likely_source": "other_integration"
+        }
+      ]
+    },
+    "docker": {
+      "support_level": "partial",
+      "summary": "Containers on monitored hosts are visible as processes with resource usage; image and build properties are not.",
+      "inherits": [
+        "oneagent_platform"
+      ],
+      "signals": [],
+      "not_covered_by_default": [
+        {
+          "signal": "Image vulnerabilities and provenance",
+          "why": "Registry and scanner data.",
+          "likely_source": "other_integration"
+        }
+      ]
+    },
+    "kubernetes": {
+      "support_level": "partial",
+      "summary": "With the Dynatrace Operator and Kubernetes monitoring, workload, pod and container resource metrics and cluster events are collected; this needs platform deployment once per cluster, not per-service configuration.",
+      "inherits": [
+        "oneagent_platform"
+      ],
+      "signals": [
+        {
+          "id": "oa.k8s.workload_resources",
+          "name": "Pod and container CPU and memory against requests and limits",
+          "category": "resources",
+          "signal_type": "metric",
+          "description": "Resource use of pods and containers compared with their requests and limits.",
+          "prerequisite": "Dynatrace Operator with Kubernetes monitoring enabled for the cluster",
+          "confidence": "medium"
+        },
+        {
+          "id": "oa.k8s.workload_state",
+          "name": "Workload, replica and pod state",
+          "category": "availability",
+          "signal_type": "metric",
+          "description": "Desired versus available replicas, pod phase and restart counts.",
+          "prerequisite": "Dynatrace Operator with Kubernetes monitoring enabled for the cluster",
+          "confidence": "medium"
+        },
+        {
+          "id": "oa.k8s.events",
+          "name": "Kubernetes events",
+          "category": "availability",
+          "signal_type": "event",
+          "description": "Events such as OOMKilled, CrashLoopBackOff and failed probes.",
+          "prerequisite": "Dynatrace Operator with Kubernetes monitoring enabled for the cluster",
+          "confidence": "medium"
+        }
+      ],
+      "not_covered_by_default": [
+        {
+          "signal": "Autoscaler decisions and PodDisruptionBudget headroom",
+          "why": "Read from the Kubernetes API or Prometheus metrics beyond the default set.",
+          "likely_source": "other_integration"
+        },
+        {
+          "signal": "Network policy denials",
+          "why": "Reported by the CNI or policy engine.",
+          "likely_source": "other_integration"
+        }
+      ]
+    },
+    "gke": {
+      "support_level": "partial",
+      "summary": "Workloads on GKE are monitored through the Kubernetes capabilities; the cluster, node pools and managed control plane come from the Google Cloud integration, not OneAgent.",
+      "inherits": [
+        "kubernetes"
+      ],
+      "signals": [],
+      "not_covered_by_default": [
+        {
+          "signal": "GKE cluster, node pool and autoscaler metrics",
+          "why": "Provided by the Google Cloud integration and Cloud Monitoring, not by OneAgent.",
+          "likely_source": "other_integration"
+        },
+        {
+          "signal": "Binary Authorization and image vulnerability findings",
+          "why": "Security data from Google Cloud services.",
+          "likely_source": "other_integration"
+        }
+      ]
+    },
+    "openshift": {
+      "support_level": "partial",
+      "summary": "Same capabilities as Kubernetes for OpenShift clusters through the Dynatrace Operator.",
+      "inherits": [
+        "kubernetes"
+      ],
+      "signals": [],
+      "not_covered_by_default": [
+        {
+          "signal": "Route and router metrics",
+          "why": "Router metrics come from the OpenShift monitoring stack.",
+          "likely_source": "other_integration"
+        },
+        {
+          "signal": "Security context constraint rejections",
+          "why": "Admission events outside the default set.",
+          "likely_source": "other_integration"
+        }
+      ]
+    },
+    "rest_apis": {
+      "support_level": "full",
+      "summary": "HTTP endpoints of monitored services are detected automatically with per-request metrics.",
+      "inherits": [
+        "oneagent_service_layer"
+      ],
+      "signals": [
+        {
+          "id": "oa.rest.request_naming",
+          "name": "Automatic request naming by route",
+          "category": "throughput",
+          "signal_type": "metric",
+          "description": "Requests are grouped by detected route or URL pattern, so per-endpoint rate, latency and failures are available without configuration.",
+          "confidence": "medium"
+        }
+      ],
+      "not_covered_by_default": [
+        {
+          "signal": "Per-client and per-API-version usage",
+          "why": "Requires request attributes or gateway data.",
+          "likely_source": "custom_instrumentation"
+        },
+        {
+          "signal": "Rate-limit rejections (429) by consumer",
+          "why": "Consumer identity is not captured by default.",
+          "likely_source": "custom_instrumentation"
+        }
+      ]
+    },
+    "api_gateway": {
+      "support_level": "limited",
+      "summary": "The gateway is visible as a service only when it is a process OneAgent instruments (for example NGINX, or JVM-based gateways such as Spring Cloud Gateway); managed cloud gateways are not monitored by OneAgent.",
+      "inherits": [
+        "oneagent_service_layer"
+      ],
+      "signals": [],
+      "not_covered_by_default": [
+        {
+          "signal": "Managed gateway throttling, quota and upstream error metrics",
+          "why": "Provided by the gateway product or cloud integration.",
+          "likely_source": "other_integration"
+        },
+        {
+          "signal": "Per-consumer traffic",
+          "why": "Consumer keys are gateway data.",
+          "likely_source": "other_integration"
+        }
+      ]
+    },
+    "service_mesh": {
+      "support_level": "limited",
+      "summary": "OneAgent sees the application processes and their calls; sidecar proxy internals are not part of default coverage.",
+      "inherits": [
+        "oneagent_service_layer"
+      ],
+      "signals": [],
+      "not_covered_by_default": [
+        {
+          "signal": "Proxy retry, timeout and outlier ejection counters",
+          "why": "Emitted by the Envoy or Linkerd proxy.",
+          "likely_source": "other_integration"
+        },
+        {
+          "signal": "mTLS traffic ratio",
+          "why": "Mesh control plane data.",
+          "likely_source": "other_integration"
+        }
+      ]
+    },
+    "data_relational": {
+      "support_level": "full",
+      "summary": "Database calls from monitored services are captured through driver instrumentation; the database's internal metrics are not.",
+      "inherits": [
+        "oneagent_service_layer"
+      ],
+      "signals": [
+        {
+          "id": "oa.db.call_time",
+          "name": "Database call response time and failure rate as seen by callers",
+          "category": "database",
+          "signal_type": "metric",
+          "description": "Time and failures of database calls per calling service, with the database shown as a service.",
+          "confidence": "medium"
+        },
+        {
+          "id": "oa.db.statements",
+          "name": "Statement-level traces",
+          "category": "database",
+          "signal_type": "trace",
+          "description": "SQL statements with duration per request for supported drivers.",
+          "confidence": "high"
+        }
+      ],
+      "not_covered_by_default": [
+        {
+          "signal": "Connection pool utilisation",
+          "why": "Pool metrics are emitted by the pool library.",
+          "likely_source": "library_emitted"
+        },
+        {
+          "signal": "Lock waits, cache hit ratio, replication lag, table bloat",
+          "why": "Engine-internal metrics need a database extension or cloud integration.",
+          "likely_source": "extension"
+        }
+      ]
+    },
+    "data_postgres": {
+      "support_level": "full",
+      "summary": "PostgreSQL calls are traced through JDBC, psycopg, pgx and other supported drivers.",
+      "inherits": [
+        "data_relational"
+      ],
+      "signals": [],
+      "not_covered_by_default": [
+        {
+          "signal": "pg_stat_statements, pg_stat_activity and replication metrics",
+          "why": "Engine-internal metrics need the PostgreSQL Dynatrace extension or cloud provider integration.",
+          "likely_source": "extension"
+        }
+      ]
+    },
+    "data_oracle": {
+      "support_level": "full",
+      "summary": "Oracle calls are traced through JDBC and supported drivers.",
+      "inherits": [
+        "data_relational"
+      ],
+      "signals": [],
+      "not_covered_by_default": [
+        {
+          "signal": "AWR and ASH performance data, Data Guard lag",
+          "why": "Engine-internal metrics need the Oracle Dynatrace extension.",
+          "likely_source": "extension"
+        }
+      ]
+    },
+    "data_sqlserver": {
+      "support_level": "full",
+      "summary": "SQL Server calls are traced through JDBC, ADO.NET, ODBC and supported drivers.",
+      "inherits": [
+        "data_relational"
+      ],
+      "signals": [],
+      "not_covered_by_default": [
+        {
+          "signal": "Query Store, blocking and availability group state",
+          "why": "Engine-internal metrics need the SQL Server Dynatrace extension.",
+          "likely_source": "extension"
+        }
+      ]
+    },
+    "data_bigquery": {
+      "support_level": "limited",
+      "summary": "BigQuery is a managed service; OneAgent sees only the calling service's outbound HTTPS calls to the BigQuery API.",
+      "inherits": [
+        "oneagent_service_layer"
+      ],
+      "signals": [],
+      "not_covered_by_default": [
+        {
+          "signal": "Query jobs, slot usage, bytes processed",
+          "why": "Provided by the Google Cloud integration, not OneAgent.",
+          "likely_source": "other_integration"
+        }
+      ]
+    },
+    "data_gcp_managed": {
+      "support_level": "limited",
+      "summary": "Managed databases are seen only through the calling service's database calls; instance metrics come from the Google Cloud integration.",
+      "inherits": [
+        "data_relational",
+        "kubernetes"
+      ],
+      "signals": [],
+      "not_covered_by_default": [
+        {
+          "signal": "Cloud SQL, AlloyDB and Spanner instance metrics (CPU, connections, replication lag, backups)",
+          "why": "Provided by the Google Cloud integration.",
+          "likely_source": "other_integration"
+        },
+        {
+          "signal": "GKE node pool and cluster state",
+          "why": "Provided by the Google Cloud and Kubernetes integrations.",
+          "likely_source": "other_integration"
+        }
+      ]
+    },
+    "caching": {
+      "support_level": "partial",
+      "summary": "Distributed caches such as Redis are detected as services through client instrumentation; in-process caches are invisible to OneAgent.",
+      "inherits": [
+        "oneagent_service_layer"
+      ],
+      "signals": [
+        {
+          "id": "oa.cache.remote_calls",
+          "name": "Calls to distributed caches",
+          "category": "database",
+          "signal_type": "trace",
+          "description": "Redis and Memcached client calls with time and failures per request for supported clients.",
+          "confidence": "medium"
+        }
+      ],
+      "not_covered_by_default": [
+        {
+          "signal": "Cache hit ratio, size and eviction count",
+          "why": "Reported by the cache library (Caffeine, Ehcache) or by the cache server.",
+          "likely_source": "library_emitted"
+        },
+        {
+          "signal": "Cache server memory and replication state",
+          "why": "Server metrics need an extension or cloud integration.",
+          "likely_source": "extension"
+        }
+      ]
+    },
+    "observability_dynatrace": {
+      "support_level": "full",
+      "summary": "OneAgent self-monitoring signals that show whether the service is actually covered.",
+      "inherits": [
+        "oneagent_platform"
+      ],
+      "signals": [
+        {
+          "id": "oa.dt.agent_status",
+          "name": "OneAgent connectivity and version",
+          "category": "availability",
+          "signal_type": "property",
+          "description": "Whether the agent is connected, its version, and which processes it monitors.",
+          "confidence": "high"
+        },
+        {
+          "id": "oa.dt.injection",
+          "name": "Code module injection status per process",
+          "category": "availability",
+          "signal_type": "property",
+          "description": "Whether the technology-specific code module was injected into each process.",
+          "confidence": "medium"
+        }
+      ],
+      "not_covered_by_default": [
+        {
+          "signal": "Ownership tags, SLOs, key requests, alerting profiles",
+          "why": "Configuration objects created by people, not auto-discovered.",
+          "likely_source": "other_integration"
+        }
+      ]
+    }
+  }
+}

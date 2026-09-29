@@ -1,0 +1,64 @@
+id: jwt_authentication
+title: JWT authentication
+layer: tech_stack
+category: security
+description: Requirements for services that issue or accept JSON Web Tokens directly (signed JWT bearer tokens, service-issued session tokens).
+extends: [baseline]
+detect:
+  - dependency: "jjwt|jose|jwt|nimbus-jose|pyjwt|jsonwebtoken|golang-jwt|jwt-go"
+recognizes: []
+catalogue_refs: [oneagent_default, application_level]
+entries:
+  - id: JWT-001
+    title: Signature algorithm allow-list and strong keys
+    requirement: Only an explicit allow-list of asymmetric algorithms (for example RS256, ES256) is accepted; none and algorithm downgrade are rejected; symmetric keys, where used, are long random values from a secrets store.
+    best_practice: Pin the algorithm per issuer; never let the token header choose; use at least 2048-bit RSA or P-256 keys.
+    audit_requirement: Key generation and storage follow the key management policy.
+    priority: critical
+    monitoring:
+      - source: custom_instrumentation
+        signal: "rejected tokens by reason (algorithm, signature)"
+    verification:
+      sources: [manual_review, stage1_dataset]
+      stage1_paths:
+        - "repositories[].fingerprint.dependencies[].name"
+        - "repositories[].secrets.hardcoded[].kind"
+      criteria: Verification is configured with a fixed algorithm and no signing key is hardcoded.
+  - id: JWT-002
+    title: Complete claim validation
+    requirement: Every token is validated for issuer, audience, expiry and not-before with a small clock-skew allowance, and required claims are present.
+    best_practice: Reject tokens missing exp; keep skew to a minute or less; validate the subject against the expected type.
+    audit_requirement: null
+    priority: critical
+    monitoring:
+      - source: oneagent_default
+        signal: "401 response rate"
+    verification:
+      sources: [manual_review]
+      criteria: Validation code checks iss, aud, exp and nbf.
+  - id: JWT-003
+    title: Short lifetimes and key rotation with kid
+    requirement: Access tokens are short-lived, signing keys rotate on a schedule, and tokens carry a key id (kid) so verifiers pick the right key during rotation.
+    best_practice: Publish keys through a JWKS endpoint with cache headers; overlap old and new keys; keep access token lifetime at minutes.
+    audit_requirement: Key rotation history retained.
+    priority: high
+    monitoring:
+      - source: platform
+        signal: "signing key age"
+      - source: custom_instrumentation
+        signal: "unknown kid failures"
+    verification:
+      sources: [manual_review]
+      criteria: Token lifetime and rotation schedule are documented and implemented.
+  - id: JWT-004
+    title: No sensitive data in token payloads and bounded token size
+    requirement: Token payloads carry only identifiers and needed claims (no secrets or unnecessary personal data), and token size is bounded to avoid header size failures.
+    best_practice: JWTs are signed, not encrypted, unless JWE is used; keep claims minimal; look up details server-side.
+    audit_requirement: Claim set is reviewed for personal data.
+    priority: medium
+    monitoring:
+      - source: oneagent_default
+        signal: "431 and 400 response rate from oversized headers"
+    verification:
+      sources: [manual_review]
+      criteria: Claims listed contain no secrets or unnecessary personal data.

@@ -1,0 +1,88 @@
+id: telemetry_coverage_tiers
+title: Telemetry coverage tiers (OneAgent default, application library, custom)
+layer: cross_cutting
+category: cross_cutting
+description: >-
+  Cross-cutting requirements about how telemetry is sourced. Three tiers must stay distinguishable: (1) what Dynatrace OneAgent captures
+  by default with zero configuration (oneagent_default_catalogue.json), (2) what the application emits itself through library
+  instrumentation such as Micrometer, OpenTelemetry or a Kafka client (app_instrumentation_catalogue.json), and (3) business-aware custom
+  metrics that need new instrumentation. The catalogues are the reference for Stage 4 so a dashboard shows default coverage separately
+  and an SRE can add metrics on top instead of duplicating what OneAgent already provides.
+detect:
+  - always: true
+recognizes:
+  - dependency: "micrometer|opentelemetry|prometheus|dropwizard|metrics-core|statsd|applicationinsights|prom-client"
+catalogue_refs: [oneagent_default, application_level]
+entry_extensions:
+  tier: "1 = OneAgent default, 2 = application library emitted, 3 = custom instrumentation"
+entries:
+  - id: TEL-001
+    title: OneAgent default coverage is confirmed and not duplicated
+    tier: 1
+    requirement: The service is monitored by OneAgent, and the signals OneAgent captures by default (request rate, response time, failure rate, runtime and process metrics, traces, topology) are used as-is; custom metrics are not added where a default signal already exists.
+    best_practice: Look up the technology in the OneAgent default catalogue before adding instrumentation; treat default metrics as the base dashboard and add only what is missing.
+    audit_requirement: null
+    priority: high
+    monitoring:
+      - source: oneagent_default
+        signal: "process and service detection for the service"
+        detail: "the service id bound in the observability config resolves to a monitored service"
+    verification:
+      sources: [stage1_dataset, runtime_telemetry]
+      stage1_paths:
+        - "observability.provider"
+        - "observability.service_id"
+        - "repositories[].fingerprint.frameworks[].name"
+      criteria: An observability provider and service id are bound, and the technologies detected have a OneAgent default catalogue module.
+  - id: TEL-002
+    title: Library-emitted metrics are catalogued separately from OneAgent defaults
+    tier: 2
+    requirement: Metrics emitted by application libraries (Micrometer, OpenTelemetry, client library metrics such as Kafka consumer lag) are inventoried per service and kept distinct from OneAgent's default signals; the two are never assumed to overlap.
+    best_practice: Decide per metric whether to ingest the library metric (when it adds something OneAgent lacks, such as consumer lag or pool saturation) or to rely on the OneAgent signal (when equivalent); avoid double counting the same measurement under two names.
+    audit_requirement: null
+    priority: medium
+    monitoring:
+      - source: library_emitted
+        signal: "the metrics listed for each detected library in the application instrumentation catalogue"
+    verification:
+      sources: [stage1_dataset]
+      stage1_paths:
+        - "repositories[].telemetry.libraries[].library"
+        - "repositories[].telemetry.libraries[].kind"
+        - "repositories[].telemetry.libraries[].documented_metrics"
+        - "repositories[].telemetry.libraries[].configuration"
+      criteria: Each telemetry library detected in Stage 1 is mapped to the application instrumentation catalogue with its metrics and configuration.
+  - id: TEL-003
+    title: Library metrics that matter are actually exported
+    tier: 2
+    requirement: Library instrumentation that emits metrics an SRE needs (pool saturation, consumer lag, breaker state, cache hit ratio) has an export path to the observability platform.
+    best_practice: Enable the registry or exporter for the platform in use (Micrometer registry, OTLP exporter or agent extension) and confirm the metrics arrive with correct dimensions.
+    audit_requirement: null
+    priority: medium
+    monitoring:
+      - source: library_emitted
+        signal: "presence of the exported metrics in the observability platform"
+    verification:
+      sources: [stage1_dataset, runtime_telemetry]
+      stage1_paths:
+        - "repositories[].telemetry.libraries[].configuration"
+        - "repositories[].telemetry.libraries[].documented_metrics"
+      criteria: An exporter or registry configuration exists for each library whose metrics are required by an NFR module.
+  - id: TEL-004
+    title: Business-aware custom metrics for the capabilities that need them
+    tier: 3
+    requirement: Where neither OneAgent defaults nor library metrics express a business outcome (orders placed, payments authorised, notifications delivered), custom instrumentation is added, chosen from the business context of the service.
+    best_practice: Emit few, meaningful counters and timers with bounded label cardinality; name them after the business capability; document owner and purpose.
+    audit_requirement: null
+    priority: low
+    monitoring:
+      - source: custom_instrumentation
+        signal: "business operation success and failure counters and latency"
+    verification:
+      sources: [stage1_dataset, manual_review]
+      stage1_paths:
+        - "business_context.capability"
+        - "business_context.category"
+        - "business_context.key_operations"
+        - "repositories[].telemetry.libraries[].custom_metrics"
+      criteria: Each key business operation has a metric from some tier; those with none are candidates for custom instrumentation, suggested in Stage 4.

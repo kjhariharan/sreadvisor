@@ -1,0 +1,110 @@
+id: data_postgres
+title: PostgreSQL
+layer: tech_stack
+category: data
+description: PostgreSQL-specific requirements, extending the general relational database module.
+extends: [baseline, data_relational]
+detect:
+  - dependency: "postgres|psycopg|pgx|lib/pq|npgsql|pg8000|asyncpg|:pg$"
+  - image: "postgres"
+recognizes: []
+catalogue_refs: [oneagent_default, application_level]
+entry_extensions:
+  pg_setting: "the PostgreSQL setting or driver property the requirement is expressed through"
+entries:
+  - id: PG-001
+    title: Connection budget and pooling
+    extends: RDB-002
+    pg_setting: max_connections, PgBouncer or driver pool
+    requirement: The total connections from all replicas at maximum scale stay within max_connections minus reserved superuser connections, using an external pooler (PgBouncer, or a managed pooler) when replicas times pool size would exceed it.
+    best_practice: Prefer transaction pooling for many small clients (mind prepared statements and session state); monitor connection saturation.
+    audit_requirement: null
+    priority: high
+    monitoring:
+      - source: platform
+        signal: "active connections versus max_connections"
+      - source: library_emitted
+        signal: "application pool active and pending connections"
+    verification:
+      sources: [stage1_dataset, manual_review]
+      stage1_paths:
+        - "repositories[].application_capacity[].key"
+        - "repositories[].application_capacity[].value"
+        - "infrastructure.autoscalers[].max_replicas"
+        - "infrastructure.workloads[].replicas"
+      criteria: pool size multiplied by maximum replicas is below max_connections.
+  - id: PG-002
+    title: TLS with certificate verification
+    extends: ENC-004
+    pg_setting: sslmode=verify-full (JDBC ssl=true&sslmode=verify-full)
+    requirement: Client connections use TLS with server certificate verification (verify-full), and the server rejects non-TLS connections through pg_hba hostssl rules.
+    best_practice: Distribute the CA certificate through a secret or trust store; use IAM or certificate authentication where available.
+    audit_requirement: null
+    priority: high
+    monitoring:
+      - source: platform
+        signal: "sessions by SSL status from pg_stat_ssl"
+    verification:
+      sources: [stage1_dataset]
+      stage1_paths:
+        - "repositories[].encryption_audit.facts[].setting"
+        - "repositories[].encryption_audit.facts[].value"
+        - "repositories[].encryption_audit.facts[].status"
+      criteria: JDBC or driver URLs enable ssl with verify-full.
+  - id: PG-003
+    title: Statement, lock and idle-in-transaction timeouts
+    extends: BASE-TO-001
+    pg_setting: statement_timeout, lock_timeout, idle_in_transaction_session_timeout
+    requirement: statement_timeout, lock_timeout and idle_in_transaction_session_timeout are set for the application role so runaway queries, lock waits and abandoned transactions cannot hold resources indefinitely.
+    best_practice: Set per role with ALTER ROLE; use lower values for OLTP roles than for reporting roles.
+    audit_requirement: null
+    priority: high
+    monitoring:
+      - source: platform
+        signal: "long-running queries and idle in transaction sessions from pg_stat_activity"
+    verification:
+      sources: [manual_review]
+      criteria: Role-level timeouts are configured.
+  - id: PG-004
+    title: Backups with point-in-time recovery and tested restore
+    extends: RDB-004
+    pg_setting: WAL archiving, managed backups
+    requirement: Continuous WAL archiving or managed automated backups provide point-in-time recovery inside the RPO, and restores are tested.
+    best_practice: Use the managed service's PITR; retain backups per policy; monitor archive lag.
+    audit_requirement: Restore test results retained.
+    priority: critical
+    monitoring:
+      - source: platform
+        signal: "WAL archive lag and last successful backup"
+    verification:
+      sources: [manual_review, stage1_dataset]
+      stage1_paths:
+        - "infrastructure.terraform_resources[].attributes"
+      criteria: Backup and PITR are enabled for the instance.
+  - id: PG-005
+    title: Vacuum, bloat and index health monitored
+    pg_setting: autovacuum settings, pg_stat_statements
+    requirement: Autovacuum is enabled and tuned for large or hot tables, and table bloat, dead tuples and unused or missing indexes are monitored, with pg_stat_statements enabled for query analysis.
+    best_practice: Alert on autovacuum lag and transaction ID wraparound distance; review top queries regularly.
+    audit_requirement: null
+    priority: medium
+    monitoring:
+      - source: platform
+        signal: "dead tuples, bloat estimate, wraparound age and pg_stat_statements"
+    verification:
+      sources: [runtime_telemetry, manual_review]
+      criteria: Database health metrics are collected and reviewed.
+  - id: PG-006
+    title: Migration lock safety
+    extends: DEP-004
+    pg_setting: lock_timeout, CREATE INDEX CONCURRENTLY
+    requirement: "Migrations avoid long exclusive locks: indexes are created concurrently, columns added with defaults safely, and a lock_timeout is set for migration sessions."
+    best_practice: Break large changes into expand and contract steps; test migration duration on production-sized data.
+    audit_requirement: null
+    priority: high
+    monitoring:
+      - source: platform
+        signal: "blocked queries during migrations"
+    verification:
+      sources: [manual_review]
+      criteria: Migration scripts use safe patterns for large tables.

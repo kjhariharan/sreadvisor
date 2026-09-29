@@ -1,0 +1,89 @@
+id: zero_trust
+title: Zero trust
+layer: tech_stack
+category: security
+description: "Requirements for services operating under a zero trust model: no implicit trust from network location, strong workload identity, and per-request authorisation."
+extends: [baseline]
+detect:
+  - infra: [mtls, mesh_authorization, network_policy]
+  - dependency: "spiffe|spire"
+recognizes:
+  - dependency: "spiffe|spire"
+catalogue_refs: [oneagent_default, application_level]
+entries:
+  - id: ZT-001
+    title: Every service-to-service call is authenticated with workload identity
+    requirement: Calls between services authenticate the calling workload (mTLS with mesh or SPIFFE identities, or signed workload tokens) rather than trusting the network path.
+    best_practice: Issue short-lived identities automatically; enforce strict mTLS in the mesh; map identities to services, not IP ranges.
+    audit_requirement: Workload identity issuance and denied connections are logged.
+    priority: critical
+    monitoring:
+      - source: platform
+        signal: "mTLS coverage percentage and denied connection count"
+    verification:
+      sources: [stage1_dataset]
+      stage1_paths:
+        - "infrastructure.mesh.mtls[].mode"
+        - "infrastructure.mesh.mtls[].scope"
+        - "infrastructure.mesh.present"
+      criteria: mTLS is enforced in strict mode for the service's namespace or mesh.
+  - id: ZT-002
+    title: Default-deny network and authorisation policies
+    requirement: Network policies and mesh authorisation policies deny all traffic by default and allow only the required source, destination and operation.
+    best_practice: Apply a default-deny NetworkPolicy per namespace; write allow rules per service pair; use AuthorizationPolicy with principals and paths, not just ports.
+    audit_requirement: Policy changes are version controlled and reviewed.
+    priority: high
+    monitoring:
+      - source: platform
+        signal: "denied flows and policy change events"
+    verification:
+      sources: [stage1_dataset]
+      stage1_paths:
+        - "infrastructure.network_policies[].name"
+        - "infrastructure.network_policies[].policy_types"
+        - "infrastructure.mesh.authorization_policies"
+      criteria: At least one default-deny NetworkPolicy or AuthorizationPolicy covers the workload; namespaces with none are a finding.
+  - id: ZT-003
+    title: Per-request authorisation at every service
+    requirement: Each service authorises each request against the caller's identity and the operation, and does not assume a request is trusted because it came from an internal service or gateway.
+    best_practice: Propagate the end-user identity token (or a signed context) to downstream services; enforce least-privilege scopes; centralise policy where possible.
+    audit_requirement: Authorisation decisions on sensitive operations are logged.
+    priority: high
+    monitoring:
+      - source: oneagent_default
+        signal: "401 and 403 response rate per service"
+    verification:
+      sources: [manual_review, stage1_dataset]
+      stage1_paths:
+        - "repositories[].entry_points[].route"
+        - "repositories[].fingerprint.dependencies[].categories"
+      criteria: A security library is a dependency and entry points are protected.
+  - id: ZT-004
+    title: Short-lived, least-privilege credentials
+    requirement: Workloads use short-lived credentials obtained through workload identity, scoped to the minimum permissions, with no long-lived shared secrets between services.
+    best_practice: Use platform workload identity federation; rotate automatically; review permissions regularly.
+    audit_requirement: Credential and permission reviews are recorded.
+    priority: high
+    monitoring:
+      - source: platform
+        signal: "credential age and permission usage"
+    verification:
+      sources: [stage1_dataset]
+      stage1_paths:
+        - "infrastructure.workloads[].service_account"
+        - "repositories[].secrets.sourced_from[].mechanism"
+      criteria: Workloads use a dedicated service account and no static shared credentials.
+  - id: ZT-005
+    title: Continuous verification and telemetry of access
+    requirement: Access decisions and anomalies (unusual callers, failed authentication bursts) are logged centrally and monitored, so trust is verified continuously rather than granted once.
+    best_practice: Centralise audit logs; alert on new caller identities and denied-request spikes.
+    audit_requirement: Access logs retained per policy.
+    priority: medium
+    monitoring:
+      - source: logs
+        signal: "authentication and authorisation events by principal"
+      - source: oneagent_default
+        signal: "service call topology changes"
+    verification:
+      sources: [manual_review]
+      criteria: Security events are collected and alerted on.

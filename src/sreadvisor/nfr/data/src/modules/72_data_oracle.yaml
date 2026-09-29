@@ -1,0 +1,92 @@
+id: data_oracle
+title: Oracle Database
+layer: tech_stack
+category: data
+description: Oracle Database requirements, extending the general relational database module.
+extends: [baseline, data_relational]
+detect:
+  - dependency: "ojdbc|oracle|cx_oracle|oracledb|godror|odp\\.net"
+  - image: "oracle|gvenzl"
+recognizes: []
+catalogue_refs: [oneagent_default, application_level]
+entry_extensions:
+  oracle_feature: "the Oracle feature, parameter or driver property involved"
+entries:
+  - id: ORA-001
+    title: Pooling with Universal Connection Pool and fast failover
+    extends: RDB-002
+    oracle_feature: UCP, Fast Application Notification (FAN), Application Continuity
+    requirement: The application uses Oracle UCP (or a pool with equivalent validation) with connection validation, sensible sizing against the database session limit, and FAN or Application Continuity so RAC or Data Guard failover is handled without errors reaching users.
+    best_practice: Enable FAN through ONS; set connection validation on borrow; use service names, not instance names; size pools to the processes and sessions budget.
+    audit_requirement: null
+    priority: high
+    monitoring:
+      - source: library_emitted
+        signal: "UCP pool statistics"
+      - source: platform
+        signal: "sessions versus limit and failover events"
+    verification:
+      sources: [stage1_dataset, manual_review]
+      stage1_paths:
+        - "repositories[].application_capacity[].key"
+        - "repositories[].application_capacity[].origin"
+      criteria: Pool settings are explicit and failover-aware.
+  - id: ORA-002
+    title: Encrypted connections with wallet-based credentials
+    extends: ENC-004
+    oracle_feature: Native Network Encryption or TCPS, Oracle wallet
+    requirement: Connections use TLS (TCPS) or native network encryption with server verification, and credentials are stored in an Oracle wallet or secrets manager, not in connection strings.
+    best_practice: Enforce encryption on the server side (SQLNET.ENCRYPTION_SERVER=REQUIRED); use external authentication for services.
+    audit_requirement: null
+    priority: high
+    monitoring:
+      - source: platform
+        signal: "sessions by encryption status"
+    verification:
+      sources: [stage1_dataset]
+      stage1_paths:
+        - "repositories[].encryption_audit.facts[].status"
+        - "repositories[].secrets.hardcoded[].kind"
+      criteria: TLS is on for the connection string and no credentials are embedded in it.
+  - id: ORA-003
+    title: Bind variables and statement timeouts
+    extends: BASE-TO-001
+    oracle_feature: bind variables, query timeout, Resource Manager
+    requirement: SQL uses bind variables (avoiding hard parses and injection), the driver sets query timeouts, and Resource Manager limits runaway sessions.
+    best_practice: Use consumer groups per application; set DEFAULT_CLASS limits; monitor hard parse ratio.
+    audit_requirement: null
+    priority: high
+    monitoring:
+      - source: platform
+        signal: "AWR and ASH top SQL, parse ratios"
+    verification:
+      sources: [manual_review]
+      criteria: Bind variables and timeouts are used.
+  - id: ORA-004
+    title: Data Guard or RAC for availability, tested failover
+    extends: DC-006
+    oracle_feature: Data Guard, RAC, Fast-Start Failover
+    requirement: Production databases run with Data Guard (with defined protection mode) or RAC, backup with RMAN or a managed service, and failover and restore are tested.
+    best_practice: Use Fast-Start Failover with an observer; test switchover; store backups in a separate failure domain.
+    audit_requirement: Failover and restore tests recorded.
+    priority: critical
+    monitoring:
+      - source: platform
+        signal: "apply lag, transport lag and backup status"
+    verification:
+      sources: [manual_review]
+      criteria: Standby and backup arrangements are documented and tested.
+  - id: ORA-005
+    title: Unified auditing enabled for sensitive activity
+    extends: ENC-006
+    oracle_feature: Unified Auditing policies, Transparent Data Encryption
+    requirement: Unified auditing captures privileged actions, logins and access to sensitive tables, with retention, and tablespaces holding sensitive data use Transparent Data Encryption.
+    best_practice: Ship audit records off the database; protect the audit trail; manage keys in a wallet or HSM.
+    audit_requirement: Audit trail retained and reviewed per policy.
+    priority: high
+    monitoring:
+      - source: logs
+        signal: "unified audit trail events"
+    verification:
+      sources: [manual_review]
+      criteria: Audit policies and TDE are enabled.

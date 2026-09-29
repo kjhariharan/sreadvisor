@@ -1,0 +1,90 @@
+id: lang_rust
+title: Rust
+layer: tech_stack
+category: language
+description: Runtime requirements for services written in Rust (Axum, Actix Web, Rocket, Tonic and Tokio-based services are covered here).
+extends: [baseline]
+detect:
+  - language: Rust
+recognizes:
+  - framework: [Axum, Actix Web, Rocket, Tonic]
+  - dependency: "^:(tokio|reqwest|hyper|sqlx|diesel|tracing|tracing-subscriber|metrics|prometheus|opentelemetry|tower|deadpool|bb8)$"
+catalogue_refs: [oneagent_default, application_level]
+entries:
+  - id: LRS-001
+    title: No panics on request paths; errors are typed and handled
+    requirement: Request handling returns errors as values mapped to responses; panics are contained (catch-panic layer or task boundary) and never take down the process.
+    best_practice: Avoid unwrap and expect on fallible input paths; use thiserror or anyhow at boundaries; set a panic hook that logs with context; decide panic=abort versus unwind deliberately.
+    audit_requirement: null
+    priority: high
+    monitoring:
+      - source: logs
+        signal: "panic events with backtrace"
+      - source: library_emitted
+        signal: "request error counters by error type"
+    verification:
+      sources: [manual_review]
+      criteria: Handlers convert errors to responses and a panic boundary exists.
+  - id: LRS-002
+    title: Async runtime configured and blocking work isolated
+    requirement: The Tokio runtime has an explicit worker thread count and a bounded blocking pool, and blocking or CPU-heavy work runs in spawn_blocking or a dedicated pool.
+    best_practice: Size workers to the container CPU limit; never block inside async tasks; monitor task and runtime metrics.
+    audit_requirement: null
+    priority: high
+    monitoring:
+      - source: library_emitted
+        signal: "tokio runtime metrics"
+        detail: "worker busy ratio, queue depth"
+    verification:
+      sources: [manual_review, stage1_dataset]
+      stage1_paths:
+        - "infrastructure.workloads[].containers[].limits"
+        - "repositories[].fingerprint.dependencies[].name"
+      criteria: Runtime configuration is explicit and consistent with the container CPU limit.
+  - id: LRS-003
+    title: Explicit timeouts on network clients
+    extends: BASE-TO-001
+    requirement: HTTP, database and gRPC clients set connect and request timeouts (reqwest has no overall timeout by default) and requests are wrapped with tower or tokio timeouts.
+    best_practice: Configure a shared client with timeouts; use tower layers for timeout, retry and concurrency limits.
+    audit_requirement: null
+    priority: critical
+    monitoring:
+      - source: library_emitted
+        signal: "client request duration and timeout counts"
+    verification:
+      sources: [stage1_dataset, manual_review]
+      stage1_paths:
+        - "repositories[].reliability_patterns[].pattern"
+      criteria: Each outbound call in the flows has a timeout pattern.
+  - id: LRS-004
+    title: Telemetry exported through OpenTelemetry
+    requirement: Because OneAgent has no code-level sensor for Rust, traces and metrics are produced with tracing and OpenTelemetry and exported over OTLP to the observability platform.
+    best_practice: Use tracing spans with W3C trace context propagation; export via an OTLP endpoint (collector or platform ingest); include service name and version resource attributes.
+    audit_requirement: null
+    priority: high
+    monitoring:
+      - source: library_emitted
+        signal: "OTLP traces and metrics from the service"
+      - source: oneagent_default
+        signal: "host and process level metrics only"
+    verification:
+      sources: [stage1_dataset]
+      stage1_paths:
+        - "repositories[].telemetry.libraries[].kind"
+        - "repositories[].fingerprint.dependencies[].name"
+      criteria: An OpenTelemetry or tracing dependency and exporter configuration exist.
+  - id: LRS-005
+    title: Dependency and license audit, release profile
+    requirement: Dependencies are audited (RustSec advisories, licenses) on every build, Cargo.lock is committed for binaries, and production builds use the release profile with overflow checks decided deliberately.
+    best_practice: Run cargo audit and cargo deny in CI; pin toolchain via rust-toolchain; produce a minimal static or distroless image.
+    audit_requirement: Audit output retained per release.
+    priority: medium
+    monitoring:
+      - source: platform
+        signal: "advisory count by severity"
+    verification:
+      sources: [stage1_dataset]
+      stage1_paths:
+        - "repositories[].fingerprint.manifests"
+        - "repositories[].fingerprint.dependencies[].version"
+      criteria: Cargo.toml and Cargo.lock are present with resolved versions.

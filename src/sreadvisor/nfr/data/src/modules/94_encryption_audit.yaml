@@ -1,0 +1,205 @@
+id: encryption_audit
+title: Encryption and audit
+layer: cross_cutting
+category: cross_cutting
+description: >-
+  Encryption at rest, encryption in transit, and audit logging with retention. Evaluated against the encryption and audit
+  evidence from Stage 1 code and infrastructure analysis (including mTLS enforced by a service mesh).
+detect:
+  - always: true
+recognizes:
+  - dependency: "envers|javers|audit"
+catalogue_refs: []
+entry_extensions:
+  domain: "at_rest | in_transit | audit | retention: matches the domain field of the Stage 1 encryption and audit facts"
+entries:
+  - id: ENC-001
+    title: Databases and storage volumes are encrypted at rest
+    domain: at_rest
+    requirement: Managed databases, persistent volumes, object storage and backups have encryption at rest enabled.
+    best_practice: Use platform-managed encryption at minimum and customer-managed keys where policy requires; encrypt snapshots and backups with the same rigour.
+    audit_requirement: Encryption configuration is evidenced for each data store holding sensitive data.
+    priority: critical
+    monitoring:
+      - source: platform
+        signal: "cloud configuration compliance checks for unencrypted disks, buckets and databases"
+    verification:
+      sources: [stage1_dataset]
+      stage1_paths:
+        - "repositories[].encryption_audit.facts[].domain"
+        - "repositories[].encryption_audit.facts[].status"
+        - "infrastructure.encryption_audit.facts[].domain"
+        - "infrastructure.encryption_audit.facts[].status"
+        - "infrastructure.terraform_resources[].attributes"
+      criteria: For every datastore and volume there is an at_rest fact with status enabled; disabled or missing is a finding (managed database attributes in Terraform count as evidence).
+  - id: ENC-002
+    title: Service-to-service and external calls use TLS
+    domain: in_transit
+    requirement: Traffic between services and to external systems is encrypted with TLS, by the application or by mesh-enforced mTLS.
+    best_practice: Enforce mTLS with the mesh in strict mode where a mesh exists; otherwise configure TLS in clients and servers; use modern protocol versions and verify certificates.
+    audit_requirement: TLS policy and certificate issuance are documented; certificate expiry is monitored.
+    priority: critical
+    monitoring:
+      - source: platform
+        signal: "percentage of mesh traffic that is mTLS"
+      - source: platform
+        signal: "certificate expiry countdown"
+    verification:
+      sources: [stage1_dataset, runtime_telemetry]
+      stage1_paths:
+        - "repositories[].encryption_audit.facts[].domain"
+        - "repositories[].encryption_audit.facts[].status"
+        - "infrastructure.mesh.mtls[].mode"
+        - "infrastructure.mesh.mtls[].scope"
+        - "cross_references[].kind"
+      criteria: >-
+        No in_transit fact with status plaintext or disabled for service-to-service or external calls, unless mesh mtls in strict mode
+        covers the traffic (transport_encryption_mesh_and_code cross reference). Where the observability provider records a
+        remote endpoint scheme for a live call, that runtime observation is evidence too: a call the code/config claims is TLS
+        but is observed with a plaintext scheme is a finding, distinct from one caught by dataset facts alone.
+  - id: ENC-003
+    title: No plain HTTP endpoints that should be HTTPS
+    domain: in_transit
+    requirement: Externally reachable endpoints terminate TLS, redirect HTTP to HTTPS and use HSTS; no internal URL in configuration uses http:// for a non-local dependency.
+    best_practice: Terminate TLS at a managed ingress or gateway with automatic certificates; keep http:// only for loopback and health probes.
+    audit_requirement: null
+    priority: high
+    monitoring:
+      - source: oneagent_default
+        signal: "request count by protocol on the entry service"
+      - source: platform
+        signal: "ingress TLS certificate validity"
+    verification:
+      sources: [stage1_dataset]
+      stage1_paths:
+        - "infrastructure.ingresses[].hosts"
+        - "infrastructure.ingresses[].tls_hosts"
+        - "repositories[].encryption_audit.facts[].status"
+        - "infrastructure.services[].type"
+      criteria: Every ingress host is in tls_hosts; no plaintext in_transit fact for a non-local target.
+  - id: ENC-004
+    title: Database and cache connections use TLS
+    domain: in_transit
+    requirement: Connections from the application to databases, caches and brokers require TLS with certificate verification.
+    best_practice: Set the driver's TLS mode to verify the server certificate (for example verify-full); use private connectivity as an additional, not a substitute, control.
+    audit_requirement: null
+    priority: high
+    monitoring:
+      - source: platform
+        signal: "database sessions by encryption status"
+    verification:
+      sources: [stage1_dataset, runtime_telemetry]
+      stage1_paths:
+        - "repositories[].encryption_audit.facts[].subject"
+        - "repositories[].encryption_audit.facts[].setting"
+        - "repositories[].encryption_audit.facts[].value"
+        - "repositories[].encryption_audit.facts[].status"
+      criteria: >-
+        Datastore connection strings and settings enable TLS; jdbc urls with ssl disabled or absent are a finding. A live
+        connection the observability provider shows negotiated without TLS is a finding too, even if config claims otherwise.
+  - id: ENC-005
+    title: Authentication events are audit logged
+    domain: audit
+    requirement: Logins, failed logins, token issuance, logouts and privilege elevation are recorded in an audit log with actor, time, source and outcome.
+    best_practice: Emit audit events as a dedicated stream separate from application logs; include a trace id; do not record credentials.
+    audit_requirement: Authentication audit records are retained per policy and protected from alteration.
+    priority: high
+    monitoring:
+      - source: logs
+        signal: "authentication success and failure events per actor and source"
+      - source: custom_instrumentation
+        signal: "failed authentication rate"
+    verification:
+      sources: [stage1_dataset, manual_review]
+      stage1_paths:
+        - "repositories[].encryption_audit.facts[].domain"
+        - "repositories[].encryption_audit.facts[].subject"
+        - "repositories[].fingerprint.dependencies[].categories"
+      criteria: An audit fact or audit library covers authentication events.
+  - id: ENC-006
+    title: Sensitive data access is audit logged
+    domain: audit
+    requirement: Reads and writes of sensitive or regulated data are recorded with who, what, when and from where.
+    best_practice: Log at the data access layer (repository or database audit) rather than relying on callers; record identifiers, not the data itself.
+    audit_requirement: Data access audit logs are queryable for the retention period.
+    priority: high
+    monitoring:
+      - source: logs
+        signal: "data access audit events for sensitive entities"
+    verification:
+      sources: [stage1_dataset, manual_review]
+      stage1_paths:
+        - "repositories[].encryption_audit.facts[].domain"
+        - "repositories[].business_context"
+        - "business_context.domain_entities"
+      criteria: Audit coverage exists for each sensitive domain entity in the business context.
+  - id: ENC-007
+    title: Administrative actions are audit logged
+    domain: audit
+    requirement: Administrative and configuration changes (user management, role changes, feature flags, infrastructure changes) are recorded in an audit trail.
+    best_practice: Use platform audit logs for infrastructure and an application audit event for admin endpoints; alert on privileged actions outside change windows.
+    audit_requirement: Administrative audit trail is retained and reviewed.
+    priority: high
+    monitoring:
+      - source: platform
+        signal: "cloud and Kubernetes audit log events for privileged actions"
+      - source: logs
+        signal: "application admin action events"
+    verification:
+      sources: [stage1_dataset, manual_review]
+      stage1_paths:
+        - "repositories[].encryption_audit.facts[].domain"
+        - "repositories[].entry_points[].route"
+      criteria: Admin entry points (routes such as /admin) and infrastructure changes are covered by audit logging.
+  - id: ENC-008
+    title: Audit and log retention is configured
+    domain: retention
+    requirement: Audit logs have an explicit retention period that meets the regulatory and organisational requirement, and old records are archived or deleted on a defined schedule.
+    best_practice: Set retention in the log platform and storage lifecycle rules; keep audit logs immutable (write-once) and off the host that produced them.
+    audit_requirement: Retention settings are evidenced for each audit stream.
+    priority: high
+    monitoring:
+      - source: platform
+        signal: "retention policy configuration and storage lifecycle status"
+    verification:
+      sources: [stage1_dataset]
+      stage1_paths:
+        - "repositories[].encryption_audit.facts[].domain"
+        - "repositories[].encryption_audit.facts[].value"
+        - "infrastructure.encryption_audit.facts[].domain"
+        - "infrastructure.encryption_audit.facts[].value"
+      criteria: At least one retention fact with a value is found for the audit streams.
+  - id: ENC-009
+    title: Key management for encryption
+    domain: at_rest
+    requirement: Encryption keys are managed in a KMS or HSM with rotation, separation of duties and access logging, not stored beside the data.
+    best_practice: Use customer-managed keys where policy requires; automate rotation; restrict decrypt permissions to the workload identity.
+    audit_requirement: Key usage and rotation logs are retained.
+    priority: medium
+    monitoring:
+      - source: platform
+        signal: "KMS key usage and rotation status"
+    verification:
+      sources: [stage1_dataset, manual_review]
+      stage1_paths:
+        - "infrastructure.terraform_resources[].type"
+        - "infrastructure.terraform_resources[].attributes"
+        - "infrastructure.encryption_audit.facts[].setting"
+      criteria: Encrypted resources reference a KMS key (or a platform-managed key policy is documented).
+  - id: ENC-010
+    title: Modern TLS versions and ciphers
+    domain: in_transit
+    requirement: TLS 1.2 or later only, with current cipher suites; legacy protocols and weak ciphers are disabled.
+    best_practice: Set the minimum version at the ingress, mesh and application server; use the platform's security policy presets.
+    audit_requirement: null
+    priority: medium
+    monitoring:
+      - source: platform
+        signal: "TLS version distribution at the ingress"
+    verification:
+      sources: [stage1_dataset, manual_review]
+      stage1_paths:
+        - "repositories[].encryption_audit.facts[].setting"
+        - "repositories[].encryption_audit.facts[].value"
+        - "infrastructure.encryption_audit.facts[].setting"
+      criteria: Configured TLS protocol versions are 1.2 or later.

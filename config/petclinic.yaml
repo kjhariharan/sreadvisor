@@ -1,0 +1,27 @@
+# Per-service configuration: fill in once, then run
+#   uv run sreadvisor analyze --config config/petclinic.yaml
+# Relative paths resolve against this file's directory.
+
+service_name: spring-petclinic
+
+code_repos:                       # one or more repository paths (or git URLs)
+  - path: ../pilot/spring-petclinic
+
+iac_paths:                        # infrastructure-as-code paths, separate from the code repos
+  - ../pilot/spring-petclinic     # Pet Clinic keeps k8s/, docker-compose.yml and CI workflows in the repo
+
+observability:
+  provider: dynatrace             # any provider enabled in the registry
+  service_id: SERVICE-0123456789ABCDEF   # placeholder: replace with the real Dynatrace service id
+  options:
+    environment_url: https://abc12345.live.dynatrace.com
+    auth_mode: api_token           # api_token (default, shown here) or oauth2
+    api_token_env: DT_API_TOKEN    # name of the env var holding the token; never put the token in this file
+    # To use an OAuth2 client-credentials grant instead, replace the two lines above with:
+    #   auth_mode: oauth2
+    #   oauth_client_id_env: DT_OAUTH_CLIENT_ID          # name of the env var holding the client id
+    #   oauth_client_secret_env: DT_OAUTH_CLIENT_SECRET  # name of the env var holding the client secret
+    #   oauth_url: https://sso.dynatrace.com/sso/oauth2/token   # optional: defaults to this Dynatrace SSO endpoint
+    #   oauth_scopes: environment-api:entities:read environment-api:metrics:read  # optional: this is the default
+
+output_dir: ../output

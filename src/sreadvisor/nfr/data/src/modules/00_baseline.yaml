@@ -1,0 +1,300 @@
+id: baseline
+title: Generic baseline
+layer: baseline
+category: baseline
+description: Non-functional requirements that apply regardless of tech stack. Tech-stack modules extend these entries.
+recognizes:
+  - dependency: "resilience4j|hystrix|failsafe|spring-retry|polly|tenacity|opossum|cockatiel|backoff"
+entry_extensions:
+  applies_to_layer: "which layer the requirement is enforced at: application | platform | both | process"
+entries:
+  - id: BASE-RETRY-001
+    title: Bounded retries with backoff for transient failures
+    requirement: >-
+      Calls to remote dependencies that can fail transiently retry a bounded number of times (a small fixed attempt
+      count) using exponential backoff with jitter, and only on errors that are actually transient.
+    best_practice: >-
+      Never retry unbounded or with a fixed delay; add jitter to avoid synchronized retry storms; retry only
+      idempotent operations or those protected by an idempotency key; enforce an overall deadline so retries
+      cannot outlast the caller's own timeout; keep retries at one layer of the call chain to avoid multiplicative amplification.
+    audit_requirement: Retry policy per dependency is documented and reviewed as part of design sign-off.
+    priority: high
+    monitoring:
+      - source: library_emitted
+        signal: "retry attempt counter by outcome"
+        detail: "e.g. resilience4j.retry.calls or the client library's retry metric"
+      - source: oneagent_default
+        signal: "failure rate and response time of the downstream service call"
+    verification:
+      sources: [stage1_dataset, manual_review]
+      stage1_paths:
+        - "repositories[].reliability_patterns[].pattern"
+        - "repositories[].reliability_patterns[].mechanism"
+        - "repositories[].reliability_patterns[].parameters"
+        - "infrastructure.mesh.traffic_policies[].kind"
+      criteria: >-
+        Every outbound dependency in the transaction flows is covered by a retry pattern in code or a mesh retry policy,
+        with a bounded attempt count; non-idempotent calls are not retried blindly.
+    applies_to_layer: both
+  - id: BASE-RETRY-002
+    title: Idempotency of retried and redelivered operations
+    requirement: Any operation that can be retried by the client, a gateway, the mesh or a message broker is idempotent or deduplicates through an idempotency key.
+    best_practice: Use natural idempotency (PUT semantics, upserts) or an idempotency-key store with a TTL; make consumers tolerate duplicate delivery.
+    audit_requirement: Financial and other regulated writes record the idempotency key with the transaction for reconciliation.
+    priority: medium
+    monitoring:
+      - source: custom_instrumentation
+        signal: "duplicate request or duplicate message detected counter"
+      - source: logs
+        signal: "idempotency-key reuse events"
+    verification:
+      sources: [stage1_dataset, manual_review]
+      stage1_paths:
+        - "repositories[].transaction_flows[].steps[].action"
+        - "repositories[].reliability_patterns[].pattern"
+      criteria: Write entry points that are retried or consumed from a broker show an idempotency mechanism or are inherently idempotent.
+    applies_to_layer: application
+  - id: BASE-CB-001
+    title: Circuit breaker on remote dependencies
+    requirement: >-
+      Each remote dependency whose failure or slowness would otherwise consume caller resources is wrapped in a circuit
+      breaker (in code or at the mesh layer) that fails fast when the dependency is unhealthy.
+    best_practice: >-
+      Combine the breaker with a timeout, a bulkhead and a defined fallback or degraded response; tune failure-rate and
+      slow-call thresholds per dependency; use half-open probing; expose breaker state as a metric.
+    audit_requirement: Breaker thresholds and fallback behaviour are recorded per dependency in the service's resilience design.
+    priority: high
+    monitoring:
+      - source: library_emitted
+        signal: "circuit breaker state and failure rate"
+        detail: "e.g. resilience4j.circuitbreaker.state"
+      - source: oneagent_default
+        signal: "response time and failure rate of the dependency's service"
+    verification:
+      sources: [stage1_dataset]
+      stage1_paths:
+        - "repositories[].reliability_patterns[].pattern"
+        - "repositories[].dependency_classification[].classification"
+        - "repositories[].dependency_classification[].protecting_patterns"
+        - "infrastructure.mesh.traffic_policies[].kind"
+      criteria: >-
+        Each dependency classified as hard_failure or gracefully_degradable has a circuit breaker in code or a mesh
+        circuit_breaker policy, or a recorded reason why not.
+    applies_to_layer: both
+  - id: BASE-TO-001
+    title: Explicit timeouts on every outbound call
+    requirement: Every network call (HTTP, gRPC, database, cache, messaging) has an explicit connect timeout and an explicit read or request timeout; none relies on an infinite or library default.
+    best_practice: Set timeouts from the dependency's observed latency percentiles plus headroom; keep them shorter than the caller's own timeout; configure them centrally per client rather than per call site.
+    audit_requirement: Timeout values are reviewed with the dependency owner and recorded per dependency.
+    priority: critical
+    monitoring:
+      - source: oneagent_default
+        signal: "service response time percentiles and failure rate per downstream call"
+      - source: library_emitted
+        signal: "client timeout counters"
+        detail: "e.g. http.client.requests with outcome=CLIENT_ERROR, hikaricp.connections.timeout"
+    verification:
+      sources: [stage1_dataset]
+      stage1_paths:
+        - "repositories[].reliability_patterns[].pattern"
+        - "repositories[].reliability_patterns[].parameters"
+        - "repositories[].application_capacity[].key"
+        - "infrastructure.mesh.traffic_policies[].kind"
+      criteria: Each outbound dependency in the flow map has a timeout pattern in code or configuration, or a mesh timeout policy.
+    applies_to_layer: both
+  - id: BASE-TO-002
+    title: Timeout budget that shrinks down the call chain
+    requirement: "Timeouts nest: a caller's timeout is larger than the sum of its downstream timeouts and retries, and deadlines are propagated rather than restarted at each hop."
+    best_practice: Propagate a request deadline (for example gRPC deadlines or a header) and derive downstream timeouts from the remaining budget; avoid client, gateway and mesh timeouts that disagree.
+    audit_requirement: null
+    priority: medium
+    monitoring:
+      - source: oneagent_default
+        signal: "distributed traces showing where in the chain time is spent"
+      - source: custom_instrumentation
+        signal: "requests that exceeded their deadline"
+    verification:
+      sources: [stage1_dataset, manual_review]
+      stage1_paths:
+        - "repositories[].reliability_patterns[].parameters"
+        - "infrastructure.mesh.traffic_policies[].settings"
+      criteria: Timeout values at gateway, mesh and client layers are consistent (outer larger than inner).
+    applies_to_layer: both
+  - id: BASE-HC-001
+    title: Separate liveness and readiness health endpoints
+    requirement: The service exposes a liveness signal (the process is alive) and a readiness signal (it can take traffic), consumed by the platform's probes.
+    best_practice: Liveness must not depend on downstream services (a dependency outage must not restart healthy pods); readiness reflects ability to serve; add a startup probe for slow starts; keep health endpoints cheap and unauthenticated on an internal port.
+    audit_requirement: null
+    priority: high
+    monitoring:
+      - source: platform
+        signal: "probe failures and restart counts"
+        detail: "container restart counts or Dynatrace Kubernetes events"
+      - source: oneagent_default
+        signal: "process availability"
+    verification:
+      sources: [stage1_dataset]
+      stage1_paths:
+        - "infrastructure.workloads[].containers[].liveness"
+        - "infrastructure.workloads[].containers[].readiness"
+        - "infrastructure.workloads[].containers[].startup"
+        - "repositories[].fingerprint.dependencies[].name"
+        - "cross_references[].kind"
+      criteria: Every workload container defines liveness and readiness probes, and the application exposes matching endpoints.
+    applies_to_layer: both
+  - id: BASE-HC-002
+    title: Readiness reflects dependency health without cascading
+    requirement: Readiness may include critical dependencies but must degrade traffic gracefully, not flap all replicas at once when a shared dependency blips.
+    best_practice: Check only dependencies without which the service cannot serve; add hysteresis (failure thresholds); prefer circuit breakers to health-check coupling for optional dependencies.
+    audit_requirement: null
+    priority: medium
+    monitoring:
+      - source: platform
+        signal: "number of ready replicas over time"
+      - source: logs
+        signal: "readiness state transitions with reason"
+    verification:
+      sources: [stage1_dataset, manual_review]
+      stage1_paths:
+        - "infrastructure.workloads[].containers[].readiness"
+        - "repositories[].dependency_classification[].dependency"
+      criteria: Readiness probe configuration uses failure thresholds and does not include dependencies classified as gracefully_degradable.
+    applies_to_layer: both
+  - id: BASE-LOG-001
+    title: Structured logging with a standard schema
+    requirement: Logs are structured (JSON or key-value), carry timestamp, level, service name, version, environment and message, and go to stdout or a collector, not local files that vanish with the container.
+    best_practice: Use one logging library and format across services; log at INFO by default with per-package override; avoid multi-line stack traces that break parsing.
+    audit_requirement: Log retention meets the organisation's policy and is set explicitly in the log platform.
+    priority: high
+    monitoring:
+      - source: logs
+        signal: "log volume by level and service"
+      - source: library_emitted
+        signal: "log event counters by level"
+        detail: "e.g. logback.events"
+    verification:
+      sources: [stage1_dataset, manual_review]
+      stage1_paths:
+        - "repositories[].encryption_audit.facts[].domain"
+        - "repositories[].fingerprint.dependencies[].name"
+      criteria: A structured logging configuration or encoder is present in the application; retention is configured where logs are collected.
+    applies_to_layer: application
+  - id: BASE-LOG-002
+    title: Trace and correlation identifiers in every log line
+    requirement: Each log line carries the trace id (and span id) or a request correlation id that is propagated across service calls.
+    best_practice: Use W3C Trace Context; inject the ids into the logging MDC/context automatically; return the id to callers in error responses.
+    audit_requirement: Correlation ids allow an audited transaction to be reconstructed across services.
+    priority: medium
+    monitoring:
+      - source: oneagent_default
+        signal: "log-to-trace correlation for supported logging frameworks"
+      - source: logs
+        signal: "share of log lines carrying a trace id"
+    verification:
+      sources: [manual_review]
+      criteria: Sampled log output contains a trace or correlation id that matches the distributed trace.
+    applies_to_layer: application
+  - id: BASE-LOG-003
+    title: No secrets or personal data in logs
+    requirement: Credentials, tokens, full card numbers and unmasked personal data are never written to logs.
+    best_practice: Mask at the logging layer with allow-lists for fields; never log full request or response bodies by default; scan logs in CI or with the log platform's sensitive-data rules.
+    audit_requirement: Periodic log review evidences absence of sensitive data (privacy and PCI-style controls).
+    priority: high
+    monitoring:
+      - source: logs
+        signal: "sensitive-data detector matches in log stream"
+    verification:
+      sources: [manual_review]
+      criteria: Logging configuration masks sensitive fields and no log statement prints secrets or full payloads.
+    applies_to_layer: application
+  - id: BASE-MON-001
+    title: RED metrics for every service entry point
+    requirement: Request rate, error rate and duration are measured and visible for each externally reachable entry point.
+    best_practice: Use histograms/percentiles rather than averages; break down by route and status class; alert on symptoms (error ratio, latency SLO burn) not causes.
+    audit_requirement: null
+    priority: critical
+    monitoring:
+      - source: oneagent_default
+        signal: "service request count, response time and failure rate"
+      - source: library_emitted
+        signal: "http server request timer"
+        detail: "e.g. http.server.requests"
+    verification:
+      sources: [stage1_dataset, runtime_telemetry]
+      stage1_paths:
+        - "repositories[].entry_points[].route"
+        - "repositories[].telemetry.libraries[].library"
+        - "observability.provider"
+      criteria: An observability provider is bound to the service and its entry points have request metrics available (default or library emitted).
+    applies_to_layer: both
+  - id: BASE-MON-002
+    title: Saturation metrics for constrained resources
+    requirement: Utilisation of CPU, memory, connection pools, thread pools and queues is measured against their limits.
+    best_practice: Alert before saturation (for example pool wait time, queue depth) rather than at failure; compare against configured limits, not host capacity.
+    audit_requirement: null
+    priority: high
+    monitoring:
+      - source: oneagent_default
+        signal: "process CPU, memory, JVM/runtime memory and GC"
+      - source: library_emitted
+        signal: "connection pool and thread pool gauges"
+        detail: "e.g. hikaricp.connections.active, executor.active"
+    verification:
+      sources: [stage1_dataset, runtime_telemetry]
+      stage1_paths:
+        - "capacity_posture.application[].category"
+        - "capacity_posture.infrastructure[].category"
+        - "repositories[].telemetry.libraries[].documented_metrics"
+      criteria: Each configured pool, executor and resource limit has a corresponding utilisation metric available.
+    applies_to_layer: both
+  - id: BASE-MON-003
+    title: SLOs and symptom-based alerting
+    requirement: Each user-facing capability has at least one SLO (availability and latency) with burn-rate alerting and a named owner.
+    best_practice: Derive SLOs from business context; use multi-window burn-rate alerts; link each alert to a runbook.
+    audit_requirement: SLO definitions and review history are retained.
+    priority: medium
+    monitoring:
+      - source: platform
+        signal: "SLO status and burn rate in the observability platform"
+    verification:
+      sources: [manual_review, stage1_dataset]
+      stage1_paths:
+        - "business_context.capability"
+        - "business_context.key_operations"
+      criteria: An SLO exists for each key business operation identified in the business context.
+    applies_to_layer: process
+  - id: BASE-MON-004
+    title: Dependency call visibility
+    requirement: Every dependency in the transaction flow map has request rate, latency and error visibility from the calling service.
+    best_practice: Rely on automatic instrumentation for standard clients; add custom spans or metrics only for clients that are not auto-instrumented.
+    audit_requirement: null
+    priority: medium
+    monitoring:
+      - source: oneagent_default
+        signal: "outbound call metrics and service topology"
+      - source: custom_instrumentation
+        signal: "metrics for clients that OneAgent does not instrument"
+    verification:
+      sources: [stage1_dataset, runtime_telemetry]
+      stage1_paths:
+        - "repositories[].transaction_flows[].dependencies[].name"
+        - "repositories[].transaction_flows[].dependencies[].kind"
+      criteria: Each dependency named in the flow map is visible in the provider's topology with metrics.
+    applies_to_layer: both
+  - id: BASE-SHUT-001
+    title: Graceful shutdown and connection draining
+    requirement: On termination the service stops accepting new work, finishes or hands off in-flight work within a bounded time, and closes connections cleanly.
+    best_practice: Handle SIGTERM; set the platform grace period above the drain time; deregister from load balancing first (preStop delay); commit or abort in-flight messages deterministically.
+    audit_requirement: null
+    priority: medium
+    monitoring:
+      - source: platform
+        signal: "requests failed during rollout"
+        detail: "error-rate spikes correlated with deployment events"
+    verification:
+      sources: [stage1_dataset, manual_review]
+      stage1_paths:
+        - "infrastructure.workloads[].termination_grace_period_seconds"
+        - "repositories[].application_capacity[].key"
+      criteria: A termination grace period is set explicitly and the application enables graceful shutdown.
+    applies_to_layer: both

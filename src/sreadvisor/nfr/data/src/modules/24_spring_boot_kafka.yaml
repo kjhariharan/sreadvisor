@@ -1,0 +1,151 @@
+id: spring_boot_kafka
+title: Spring Boot plus Kafka
+layer: tech_stack
+category: integration
+description: Messaging requirements for Spring Boot services that produce or consume Kafka topics through Spring for Apache Kafka. Extends the event-driven baseline with consumer groups, dead letter topics and retry topics.
+extends: [baseline, event_driven_messaging, spring_boot]
+detect:
+  - framework: Spring Boot
+    dependency: "spring-kafka|kafka-clients|spring-cloud-stream-binder-kafka"
+recognizes: []
+catalogue_refs: [oneagent_default, application_level]
+entry_extensions:
+  kafka_property: "the Kafka client or Spring property the requirement is expressed through"
+entries:
+  - id: SBK-001
+    title: Explicit and stable consumer group configuration
+    extends: EDA-003
+    kafka_property: spring.kafka.consumer.group-id, concurrency, partition.assignment.strategy
+    requirement: Each listener has an explicit, stable group.id (never a generated one), a documented concurrency no greater than the partition count, and a cooperative assignment strategy where rebalances must be short.
+    best_practice: Name groups after the service and function; use static membership (group.instance.id) for stateful consumers; set session.timeout.ms and heartbeat.interval.ms deliberately.
+    audit_requirement: Consumer groups are registered with their owning team.
+    priority: high
+    monitoring:
+      - source: library_emitted
+        signal: "consumer rebalance rate and assigned partitions"
+      - source: platform
+        signal: "consumer group state on the broker"
+    verification:
+      sources: [stage1_dataset, manual_review]
+      stage1_paths:
+        - "repositories[].entry_points[].kind"
+        - "repositories[].entry_points[].annotation"
+        - "repositories[].telemetry.libraries[].configuration"
+      criteria: Every @KafkaListener sets a groupId or a default group id is configured, and concurrency is set.
+  - id: SBK-002
+    title: Offsets committed only after successful processing
+    kafka_property: enable.auto.commit=false, spring.kafka.listener.ack-mode
+    requirement: Auto-commit is off; offsets are committed by the listener container after the record is handled (record or batch ack mode), so failure never loses a message.
+    best_practice: Use the container's ack-mode RECORD or BATCH with an error handler; commit after side effects; consider transactional processing for exactly-once between Kafka topics.
+    audit_requirement: null
+    priority: critical
+    monitoring:
+      - source: library_emitted
+        signal: "commit latency and commit rate"
+      - source: library_emitted
+        signal: "consumer lag"
+    verification:
+      sources: [manual_review, stage1_dataset]
+      stage1_paths:
+        - "repositories[].telemetry.libraries[].configuration"
+      criteria: enable.auto.commit is false and an ack mode is configured.
+  - id: SBK-003
+    title: Dead letter topic with bounded backoff
+    extends: EDA-002
+    kafka_property: DefaultErrorHandler, DeadLetterPublishingRecoverer, BackOff
+    requirement: The listener container error handler uses a bounded backoff (attempts and delays) and then publishes the record to a dead letter topic (DLT) with exception headers.
+    best_practice: Use DeadLetterPublishingRecoverer with the same partition for ordering; classify non-retryable exceptions (validation, deserialization) to go straight to the DLT; give the DLT its own retention and an alert.
+    audit_requirement: DLT records are retained for the investigation period.
+    priority: critical
+    monitoring:
+      - source: library_emitted
+        signal: "records published to the DLT"
+      - source: platform
+        signal: "DLT topic end offsets and consumer lag"
+    verification:
+      sources: [stage1_dataset]
+      stage1_paths:
+        - "repositories[].reliability_patterns[].pattern"
+        - "repositories[].reliability_patterns[].mechanism"
+        - "repositories[].entry_points[].kind"
+      criteria: A dead letter recoverer or @RetryableTopic with a DLT is configured for each Kafka listener.
+  - id: SBK-004
+    title: Retry topics for non-blocking retries
+    extends: BASE-RETRY-001
+    kafka_property: "@RetryableTopic(attempts, backoff, dltStrategy)"
+    requirement: Retries with delay use retry topics (non-blocking) rather than blocking the partition with in-listener sleeps, with bounded attempts, increasing delay and a terminal DLT.
+    best_practice: Use @RetryableTopic with exponential backoff and jitter; keep ordering-sensitive flows on blocking retry with a short bound; monitor each retry topic.
+    audit_requirement: null
+    priority: high
+    monitoring:
+      - source: library_emitted
+        signal: "retry topic publish counts by attempt"
+      - source: platform
+        signal: "retry topic lag"
+    verification:
+      sources: [stage1_dataset]
+      stage1_paths:
+        - "repositories[].reliability_patterns[].mechanism"
+        - "repositories[].reliability_patterns[].parameters"
+      criteria: Listeners that call fallible dependencies use retry topics or a bounded blocking backoff.
+  - id: SBK-005
+    title: Reliable producer settings
+    kafka_property: acks=all, enable.idempotence=true, delivery.timeout.ms, retries
+    requirement: Producers set acks=all, enable idempotence, and an explicit delivery timeout, with min.insync.replicas of at least 2 on the topic.
+    best_practice: Handle send callbacks and failures; use a transactional producer where atomic multi-topic writes are needed; set linger and batch sizes from load tests.
+    audit_requirement: null
+    priority: high
+    monitoring:
+      - source: library_emitted
+        signal: "record error rate and request latency"
+        detail: "Kafka producer metrics"
+    verification:
+      sources: [manual_review, stage1_dataset]
+      stage1_paths:
+        - "repositories[].telemetry.libraries[].configuration"
+      criteria: Producer properties set acks, idempotence and delivery timeout.
+  - id: SBK-006
+    title: Poll settings match processing time
+    kafka_property: max.poll.interval.ms, max.poll.records, fetch.max.wait.ms
+    requirement: max.poll.records and max.poll.interval.ms are set so the slowest batch finishes well before the poll interval, preventing spurious rebalances.
+    best_practice: Reduce max.poll.records for slow handlers; move slow work off the poll thread only with careful ack handling; alert on rebalance frequency.
+    audit_requirement: null
+    priority: medium
+    monitoring:
+      - source: library_emitted
+        signal: "poll interval and rebalance rate"
+    verification:
+      sources: [manual_review]
+      criteria: Handler duration percentiles are below max.poll.interval.ms with margin.
+  - id: SBK-007
+    title: Poison-pill safe deserialization
+    kafka_property: ErrorHandlingDeserializer
+    requirement: Deserializers are wrapped with ErrorHandlingDeserializer so a malformed record is routed to error handling rather than crashing the consumer in a loop.
+    best_practice: Use a schema-aware deserializer with compatibility rules; restrict trusted packages for JSON type mapping.
+    audit_requirement: null
+    priority: high
+    monitoring:
+      - source: library_emitted
+        signal: "deserialization error count"
+    verification:
+      sources: [manual_review, stage1_dataset]
+      stage1_paths:
+        - "repositories[].telemetry.libraries[].configuration"
+      criteria: ErrorHandlingDeserializer is configured for key and value deserialization.
+  - id: SBK-008
+    title: Kafka client metrics exported and alerted
+    extends: EDA-004
+    requirement: Consumer lag, records consumed per poll and commit latency are exported through Micrometer's Kafka metrics binding and alerted on.
+    best_practice: Use the default Spring Boot Micrometer binding for Kafka consumer and producer metrics; alert on lag growth and on time-to-process.
+    audit_requirement: null
+    priority: high
+    monitoring:
+      - source: library_emitted
+        signal: "kafka.consumer.fetch.manager.records.lag.max, records.consumed.total and commit.latency.avg"
+        detail: "not OneAgent default"
+    verification:
+      sources: [stage1_dataset]
+      stage1_paths:
+        - "repositories[].telemetry.libraries[].kind"
+        - "repositories[].telemetry.libraries[].documented_metrics"
+      criteria: A kafka_client telemetry library is detected and its metrics are exported.

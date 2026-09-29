@@ -1,0 +1,91 @@
+id: docker
+title: Docker and container images
+layer: tech_stack
+category: iac_container
+description: Requirements for container images and Docker Compose definitions.
+extends: [baseline]
+detect:
+  - infra: docker
+recognizes:
+  - infra: [docker, docker_compose]
+catalogue_refs: [oneagent_default, application_level]
+entries:
+  - id: DKR-001
+    title: Images run as a non-root user
+    requirement: Each image sets a non-root USER (numeric) and does not require privileged mode or added capabilities.
+    best_practice: Create a dedicated user; drop all Linux capabilities and add back only what is needed; use a read-only root filesystem where the application allows.
+    audit_requirement: null
+    priority: high
+    monitoring:
+      - source: platform
+        signal: "admission or runtime policy violations for root containers"
+    verification:
+      sources: [stage1_dataset]
+      stage1_paths:
+        - "infrastructure.dockerfiles[].user"
+        - "infrastructure.workloads[].containers[].run_as_non_root"
+      criteria: Every Dockerfile sets a non-root user and no workload runs as root.
+  - id: DKR-002
+    title: Minimal, pinned base images and multi-stage builds
+    requirement: Base images are minimal (slim, distroless or similar), pinned to a specific version or digest (never latest), and the build uses multi-stage builds so build tools are not in the runtime image.
+    best_practice: Rebuild regularly to pick up patches; scan images in CI and in the registry; keep the image small.
+    audit_requirement: Image scan results retained per release.
+    priority: medium
+    monitoring:
+      - source: platform
+        signal: "image vulnerabilities by severity in the registry"
+    verification:
+      sources: [stage1_dataset]
+      stage1_paths:
+        - "infrastructure.dockerfiles[].base_images"
+        - "infrastructure.compose_services[].image"
+      criteria: Base images carry explicit version tags or digests and none uses the latest tag.
+  - id: DKR-003
+    title: Health check defined where no orchestrator probe applies
+    extends: BASE-HC-001
+    requirement: Images or Compose services define a HEALTHCHECK (or an orchestrator probe) so a hung process is detected and restarted.
+    best_practice: Use a lightweight check against the readiness endpoint; set interval, timeout and retries; use depends_on with a healthy condition for start order.
+    audit_requirement: null
+    priority: medium
+    monitoring:
+      - source: platform
+        signal: "container health status and restart count"
+    verification:
+      sources: [stage1_dataset]
+      stage1_paths:
+        - "infrastructure.dockerfiles[].has_healthcheck"
+        - "infrastructure.compose_services[].healthcheck"
+        - "infrastructure.compose_services[].restart"
+      criteria: Each Dockerfile or Compose service has a health check or is orchestrated with probes; Compose services have a restart policy.
+  - id: DKR-004
+    title: No secrets baked into image layers or Compose files
+    extends: SEC-001
+    requirement: Images and Compose files contain no credentials, keys or tokens; build secrets use BuildKit secret mounts and runtime secrets are injected.
+    best_practice: Use .dockerignore; use secret mounts for build-time credentials; scan images for embedded secrets.
+    audit_requirement: null
+    priority: critical
+    monitoring:
+      - source: platform
+        signal: "secret scanning results on images and repositories"
+    verification:
+      sources: [stage1_dataset]
+      stage1_paths:
+        - "infrastructure.secrets.hardcoded[].kind"
+        - "infrastructure.secrets.hardcoded[].evidence"
+      criteria: No hardcoded credential findings in Dockerfiles or Compose files (demo defaults are noted).
+  - id: DKR-005
+    title: Resource limits and signal handling
+    extends: CAP-001
+    requirement: Compose services set memory and CPU limits, and images run the application as PID 1 through an init or exec form so SIGTERM reaches it and shutdown is graceful.
+    best_practice: Use exec form ENTRYPOINT or tini; set stop_grace_period; set limits under deploy.resources or the runtime's flags.
+    audit_requirement: null
+    priority: medium
+    monitoring:
+      - source: oneagent_default
+        signal: "container CPU and memory usage"
+    verification:
+      sources: [stage1_dataset]
+      stage1_paths:
+        - "infrastructure.compose_services[].limits"
+        - "infrastructure.compose_services[].replicas"
+      criteria: Compose services declare limits.

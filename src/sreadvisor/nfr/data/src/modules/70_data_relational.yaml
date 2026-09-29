@@ -1,0 +1,131 @@
+id: data_relational
+title: Relational databases (general)
+layer: tech_stack
+category: data
+description: Engine-independent requirements for services using relational databases (JDBC, ORM, SQL drivers). Engine-specific modules extend this one.
+extends: [baseline]
+detect:
+  - dependency: "jdbc|hibernate|jpa|:h2$|h2database|hsqldb|derby|mysql|mariadb|postgres|psycopg|pgx|lib/pq|ojdbc|oracle|mssql|sqlserver|sqlite|sqlalchemy|typeorm|sequelize|prisma|knex|gorm|sqlx|diesel|entityframeworkcore|npgsql|jooq|mybatis|liquibase|flyway"
+  - image: "postgres|mysql|mariadb|mssql|oracle"
+recognizes:
+  - dependency: "flyway|liquibase|alembic|knex|jooq|mybatis"
+catalogue_refs: [oneagent_default, application_level]
+entries:
+  - id: RDB-001
+    title: Production uses a durable database, not an embedded or in-memory one
+    requirement: Production profiles connect to a managed or clustered relational database with persistence; embedded databases such as H2, HSQLDB or SQLite in-memory are for local development and tests only.
+    best_practice: Select the datasource per profile; keep the same engine in CI as in production (for example Testcontainers); never let the default in-memory profile reach production.
+    audit_requirement: null
+    priority: critical
+    monitoring:
+      - source: oneagent_default
+        signal: "database service detected for the calling service"
+        detail: "the connected database type and host are visible"
+    verification:
+      sources: [stage1_dataset, manual_review]
+      stage1_paths:
+        - "repositories[].fingerprint.dependencies[].name"
+        - "repositories[].fingerprint.dependencies[].categories"
+        - "infrastructure.workloads[].containers[].image"
+        - "infrastructure.compose_services[].image"
+      criteria: A production-grade driver and database workload or managed instance exist; H2 or another embedded database is present only for local profiles.
+  - id: RDB-002
+    title: Explicit connection pool, transaction and statement timeouts
+    extends: BASE-TO-001
+    requirement: The pool size, connection acquisition timeout, idle and lifetime limits, and statement, lock and transaction timeouts are set explicitly, and transactions are as short as possible.
+    best_practice: Set statement and lock timeouts at the database role or driver level; use read-only transactions for queries; avoid holding a transaction across remote calls.
+    audit_requirement: null
+    priority: high
+    monitoring:
+      - source: library_emitted
+        signal: "pool active, pending, timeout and usage metrics"
+      - source: oneagent_default
+        signal: "database call response time and failure rate"
+    verification:
+      sources: [stage1_dataset]
+      stage1_paths:
+        - "repositories[].application_capacity[].category"
+        - "repositories[].application_capacity[].key"
+        - "repositories[].application_capacity[].origin"
+        - "repositories[].reliability_patterns[].pattern"
+      criteria: db_pool settings are explicit and a timeout pattern covers datastore calls.
+  - id: RDB-003
+    title: Versioned schema migrations
+    extends: DEP-003
+    requirement: Schema changes are managed with a migration tool (Flyway, Liquibase, Alembic or equivalent) with versioned, reviewed scripts; the application does not auto-alter production schemas.
+    best_practice: Keep scripts immutable once released; test migrations against a production-like copy; run them as a separate step.
+    audit_requirement: Migration history table and scripts retained.
+    priority: high
+    monitoring:
+      - source: logs
+        signal: "migration execution log"
+    verification:
+      sources: [stage1_dataset]
+      stage1_paths:
+        - "repositories[].fingerprint.dependencies[].categories"
+        - "infrastructure.pipelines[].db_migration.tool"
+        - "cross_references[].kind"
+      criteria: A schema_migration dependency exists or scripts are managed by a pipeline step; schema is not auto-created in production.
+  - id: RDB-004
+    title: Backups, restore tests and recovery objectives
+    requirement: Databases are backed up automatically with point-in-time recovery where the engine supports it, restores are tested on a schedule, and RPO and RTO are defined and met.
+    best_practice: Store backups in a separate failure domain, encrypted; automate restore drills; alert on backup failure.
+    audit_requirement: Backup success and restore test evidence retained.
+    priority: critical
+    monitoring:
+      - source: platform
+        signal: "backup success, age of last backup and restore test results"
+    verification:
+      sources: [manual_review, stage1_dataset]
+      stage1_paths:
+        - "infrastructure.terraform_resources[].attributes"
+        - "infrastructure.workloads[].kind"
+      criteria: Backup configuration is present in infrastructure code or platform settings and a restore has been tested.
+  - id: RDB-005
+    title: Replication and failover for the primary
+    extends: DC-006
+    requirement: The primary database has a replica or managed high-availability failover, and the application reconnects automatically after failover.
+    best_practice: Connect through a stable endpoint; validate connections on borrow; test failover; route read-only work to replicas where suitable.
+    audit_requirement: null
+    priority: high
+    monitoring:
+      - source: platform
+        signal: "replication lag and failover events"
+      - source: oneagent_default
+        signal: "database call failure rate during failover"
+    verification:
+      sources: [stage1_dataset, manual_review]
+      stage1_paths:
+        - "infrastructure.workloads[].replicas"
+        - "infrastructure.terraform_resources[].attributes"
+      criteria: A single-instance database in production is a finding; managed HA or replication is present.
+  - id: RDB-006
+    title: Parameterised queries and least-privilege accounts
+    requirement: All queries use bound parameters (no string-built SQL from input), and the application connects with an account limited to the privileges it needs, separate from the migration and admin accounts.
+    best_practice: Use ORM or prepared statements; separate roles for migration and runtime; rotate credentials.
+    audit_requirement: Database privileges are reviewed periodically.
+    priority: high
+    monitoring:
+      - source: logs
+        signal: "database audit of privileged statements"
+    verification:
+      sources: [manual_review, stage1_dataset]
+      stage1_paths:
+        - "repositories[].secrets.hardcoded[].key"
+        - "repositories[].secrets.sourced_from[].name"
+      criteria: Queries are parameterised and the application account does not have admin privileges.
+  - id: RDB-007
+    title: Query performance visibility
+    extends: BASE-MON-004
+    requirement: Slow queries, N+1 access patterns and missing indexes are detectable through statement-level monitoring, and critical queries have reviewed execution plans and indexes.
+    best_practice: Use statement-level tracing from the observability platform and the engine's slow query log; review plans in code review for new queries.
+    audit_requirement: null
+    priority: medium
+    monitoring:
+      - source: oneagent_default
+        signal: "database statements per request with response time"
+      - source: platform
+        signal: "slow query log and index usage statistics"
+    verification:
+      sources: [runtime_telemetry, manual_review]
+      criteria: Slow statements are visible per calling service and reviewed.

@@ -1,0 +1,106 @@
+id: lang_javascript_typescript
+title: JavaScript / TypeScript (Node.js)
+layer: tech_stack
+category: language
+description: Runtime requirements for Node.js services written in JavaScript or TypeScript (Express, NestJS, Next.js and similar are covered here).
+extends: [baseline]
+detect:
+  - language: [JavaScript, TypeScript]
+  - framework: [Express, NestJS, Next.js]
+recognizes:
+  - framework: [React, Angular]
+  - dependency: "^:(axios|node-fetch|got|ioredis|bullmq|opossum|cockatiel|prom-client|typeorm|sequelize|prisma|mongoose|knex|pg|mysql2)$"
+catalogue_refs: [oneagent_default, application_level]
+entries:
+  - id: LJS-001
+    title: Supported Node.js LTS runtime
+    requirement: The service runs on a Node.js release line that is in active or maintenance LTS.
+    best_practice: Pin the version in the manifest (engines) and the base image; upgrade on the LTS cadence; run with NODE_ENV=production.
+    audit_requirement: Runtime versions are inventoried for vulnerability management.
+    priority: medium
+    monitoring:
+      - source: oneagent_default
+        signal: "Node.js version reported per process"
+    verification:
+      sources: [stage1_dataset]
+      stage1_paths:
+        - "repositories[].fingerprint.runtime_versions"
+        - "repositories[].fingerprint.manifests"
+      criteria: An engines or runtime version is declared and is an LTS line.
+  - id: LJS-002
+    title: Process-level error handling and graceful shutdown
+    extends: BASE-SHUT-001
+    requirement: Unhandled promise rejections and uncaught exceptions are handled deliberately (log, then exit so the platform restarts), and SIGTERM triggers a graceful drain of the HTTP server and connections.
+    best_practice: Register handlers for unhandledRejection, uncaughtException and SIGTERM; close the server and pools before exit; run node directly as PID 1 or use an init.
+    audit_requirement: null
+    priority: high
+    monitoring:
+      - source: oneagent_default
+        signal: "process restarts and availability"
+      - source: logs
+        signal: "unhandled rejection and uncaught exception events"
+    verification:
+      sources: [manual_review, stage1_dataset]
+      stage1_paths:
+        - "infrastructure.workloads[].termination_grace_period_seconds"
+      criteria: Shutdown handlers exist and the grace period is set.
+  - id: LJS-003
+    title: Event loop kept responsive
+    requirement: CPU-heavy or synchronous work does not block the event loop; event loop lag is monitored against a budget.
+    best_practice: Offload heavy work to worker threads or separate services; avoid synchronous fs and crypto calls on request paths; monitor event loop delay.
+    audit_requirement: null
+    priority: high
+    monitoring:
+      - source: oneagent_default
+        signal: "Node.js event loop and V8 heap metrics"
+      - source: library_emitted
+        signal: "nodejs_eventloop_lag_seconds"
+        detail: "prom-client default metrics"
+    verification:
+      sources: [runtime_telemetry, manual_review]
+      criteria: Event loop lag percentiles stay within budget under load.
+  - id: LJS-004
+    title: Timeouts and connection reuse on outbound HTTP clients
+    extends: BASE-TO-001
+    requirement: Outbound HTTP calls set a timeout (axios and fetch have none by default) and reuse connections through a keep-alive agent with bounded sockets.
+    best_practice: Use AbortSignal.timeout or client timeout options; configure a shared agent (maxSockets); add bounded retries with jitter.
+    audit_requirement: null
+    priority: critical
+    monitoring:
+      - source: oneagent_default
+        signal: "outbound request response time and failure rate"
+    verification:
+      sources: [stage1_dataset, manual_review]
+      stage1_paths:
+        - "repositories[].reliability_patterns[].pattern"
+        - "repositories[].fingerprint.dependencies[].categories"
+      criteria: Each outbound HTTP call in the flows has a timeout pattern.
+  - id: LJS-005
+    title: Memory limit aligned with V8 heap
+    requirement: The V8 old-space limit is set relative to the container memory limit so the process is not OOM-killed unpredictably.
+    best_practice: Set --max-old-space-size to roughly 75 percent of the container limit; monitor heap used against it.
+    audit_requirement: null
+    priority: medium
+    monitoring:
+      - source: oneagent_default
+        signal: "V8 heap memory and process working set"
+    verification:
+      sources: [stage1_dataset, manual_review]
+      stage1_paths:
+        - "infrastructure.workloads[].containers[].limits"
+      criteria: Container memory limit and Node heap flag are both set and consistent.
+  - id: LJS-006
+    title: Locked and audited dependencies, strict typing
+    requirement: A lock file is committed and used for installs (npm ci), dependencies are audited on every build, and TypeScript projects compile with strict mode.
+    best_practice: Use npm ci or the equivalent frozen install; automated dependency updates; block builds on high-severity advisories.
+    audit_requirement: SBOM and audit results retained per release.
+    priority: medium
+    monitoring:
+      - source: platform
+        signal: "vulnerable dependency count"
+    verification:
+      sources: [stage1_dataset]
+      stage1_paths:
+        - "repositories[].fingerprint.manifests"
+        - "repositories[].fingerprint.dependencies[].version"
+      criteria: A lock file exists and dependency versions are pinned.

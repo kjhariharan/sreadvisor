@@ -1,0 +1,123 @@
+id: kubernetes
+title: Kubernetes
+layer: tech_stack
+category: iac_container
+description: Platform-specific requirements for workloads on Kubernetes (including Helm-rendered manifests and GKE). Resource sizing, autoscaling, replicas and rollout are cross-cutting requirements evaluated in the capacity and deployment modules.
+extends: [baseline]
+detect:
+  - infra: [kubernetes, helm]
+recognizes:
+  - infra: [kubernetes, helm]
+catalogue_refs: [oneagent_default, application_level]
+entries:
+  - id: K8S-001
+    title: Liveness, readiness and startup probes of the right kind
+    extends: BASE-HC-001
+    requirement: Each container has a readiness probe, a liveness probe that does not depend on downstream services, and a startup probe for slow-starting applications, each with explicit thresholds and timeouts.
+    best_practice: Use HTTP probes against dedicated endpoints; set initialDelay only when a startup probe is not used; avoid probes that call databases.
+    audit_requirement: null
+    priority: high
+    monitoring:
+      - source: platform
+        signal: "probe failures and container restarts"
+    verification:
+      sources: [stage1_dataset]
+      stage1_paths:
+        - "infrastructure.workloads[].containers[].liveness"
+        - "infrastructure.workloads[].containers[].readiness"
+        - "infrastructure.workloads[].containers[].startup"
+      criteria: All three probe types are set appropriately for each container; missing probes are findings.
+  - id: K8S-002
+    title: Hardened security context
+    requirement: Pods run as non-root with a read-only root filesystem where possible, privilege escalation disabled and all capabilities dropped, under a Pod Security Standard of at least baseline (restricted for new workloads).
+    best_practice: Set runAsNonRoot, allowPrivilegeEscalation false, capabilities drop ALL and seccomp RuntimeDefault; enforce with Pod Security Admission.
+    audit_requirement: Policy violations are logged.
+    priority: high
+    monitoring:
+      - source: platform
+        signal: "admission denials and policy violations"
+    verification:
+      sources: [stage1_dataset]
+      stage1_paths:
+        - "infrastructure.workloads[].containers[].run_as_non_root"
+        - "infrastructure.workloads[].service_account"
+      criteria: Containers set run_as_non_root true and use a dedicated service account.
+  - id: K8S-003
+    title: Network policies restrict traffic
+    extends: ZT-002
+    requirement: Each namespace has a default-deny NetworkPolicy with explicit allow rules for the service's required ingress and egress.
+    best_practice: Allow only DNS, the required dependencies and the ingress controller; label workloads consistently for selectors.
+    audit_requirement: Policy changes reviewed via version control.
+    priority: high
+    monitoring:
+      - source: platform
+        signal: "dropped connections by policy"
+    verification:
+      sources: [stage1_dataset]
+      stage1_paths:
+        - "infrastructure.network_policies[].name"
+        - "infrastructure.network_policies[].policy_types"
+      criteria: NetworkPolicy resources exist covering the workload namespace.
+  - id: K8S-004
+    title: Failure-domain spreading and disruption protection
+    extends: CAP-003
+    requirement: Multi-replica workloads spread across nodes and zones with topology spread constraints or anti-affinity, and are protected by a PodDisruptionBudget.
+    best_practice: Use topologySpreadConstraints with maxSkew 1 across zones and hostnames; combine with a PDB.
+    audit_requirement: null
+    priority: high
+    monitoring:
+      - source: platform
+        signal: "replica distribution across nodes and zones"
+    verification:
+      sources: [stage1_dataset]
+      stage1_paths:
+        - "infrastructure.workloads[].has_topology_spread"
+        - "infrastructure.workloads[].has_pod_anti_affinity"
+        - "infrastructure.disruption_budgets[].selector"
+      criteria: Workloads with two or more replicas have spread constraints and a budget.
+  - id: K8S-005
+    title: Namespace quotas and default limits
+    requirement: Namespaces define ResourceQuota and LimitRange so no workload can consume unbounded resources or run without requests and limits.
+    best_practice: Set quotas per team and environment; set LimitRange defaults; monitor quota usage.
+    audit_requirement: null
+    priority: medium
+    monitoring:
+      - source: platform
+        signal: "quota utilisation by namespace"
+    verification:
+      sources: [manual_review, stage1_dataset]
+      stage1_paths:
+        - "infrastructure.capacity[].category"
+        - "infrastructure.workloads[].namespace"
+      criteria: Quotas exist for the workload's namespace.
+  - id: K8S-006
+    title: Ingress and services expose only what is needed with TLS
+    extends: ENC-003
+    requirement: Only the intended services are exposed (ClusterIP by default, LoadBalancer or NodePort only when required), and ingresses terminate TLS with managed certificates.
+    best_practice: Use one ingress controller with TLS everywhere; do not use NodePort in production; restrict the management port.
+    audit_requirement: null
+    priority: high
+    monitoring:
+      - source: platform
+        signal: "certificate expiry and ingress error rate"
+    verification:
+      sources: [stage1_dataset]
+      stage1_paths:
+        - "infrastructure.services[].type"
+        - "infrastructure.ingresses[].tls_hosts"
+        - "infrastructure.ingresses[].hosts"
+      criteria: No unneeded NodePort or LoadBalancer services and every ingress host has TLS.
+  - id: K8S-007
+    title: Kubernetes API audit logging and RBAC least privilege
+    requirement: The cluster records API audit logs (including secret access and exec) and workloads use RBAC roles limited to what they need, with service account token automounting disabled unless required.
+    best_practice: Ship audit logs to central storage with retention; review cluster-admin bindings; disable automount for workloads that do not call the API.
+    audit_requirement: Audit logs retained per policy and reviewed.
+    priority: high
+    monitoring:
+      - source: platform
+        signal: "audit events for exec, secret get and RBAC changes"
+    verification:
+      sources: [manual_review, stage1_dataset]
+      stage1_paths:
+        - "infrastructure.workloads[].service_account"
+      criteria: Audit logging is enabled on the cluster and workloads use non-default service accounts.

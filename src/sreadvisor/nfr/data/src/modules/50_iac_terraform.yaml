@@ -1,0 +1,100 @@
+id: iac_terraform
+title: Terraform
+layer: tech_stack
+category: iac_container
+description: Requirements for infrastructure defined as code with Terraform (any provider), including Google Cloud resources.
+extends: [baseline]
+detect:
+  - infra: terraform
+recognizes:
+  - terraform: "^(random|null|time|tls|local|kubernetes|helm)_"
+catalogue_refs: [oneagent_default, application_level]
+entries:
+  - id: TF-001
+    title: Remote, locked and encrypted state
+    requirement: State is stored in a remote backend with locking, encryption at rest, versioning and restricted access, never committed to the repository.
+    best_practice: Use a bucket backend with versioning and a lock mechanism; separate state per environment and component; restrict who can read state (it can contain secrets).
+    audit_requirement: State access and changes are logged.
+    priority: critical
+    monitoring:
+      - source: platform
+        signal: "backend access logs and state lock events"
+    verification:
+      sources: [stage1_dataset, manual_review]
+      stage1_paths:
+        - "infrastructure.terraform_resources[].type"
+        - "infrastructure.secrets.hardcoded[].location_type"
+      criteria: Backend configuration is remote with locking; no state file is committed.
+  - id: TF-002
+    title: Pinned provider and module versions
+    requirement: Terraform, provider and module versions are pinned with version constraints and a committed dependency lock file.
+    best_practice: Use required_version and required_providers with constraints; update through reviewed pull requests; pin module sources to tags or commits.
+    audit_requirement: null
+    priority: high
+    monitoring:
+      - source: platform
+        signal: "drift between planned and applied provider versions"
+    verification:
+      sources: [manual_review]
+      criteria: required_providers has version constraints and .terraform.lock.hcl is committed.
+  - id: TF-003
+    title: Plan review and policy checks before apply
+    extends: DEP-006
+    requirement: Every change is planned, reviewed and checked by policy tooling (for example Checkov, tfsec, OPA or Sentinel) before apply, and applied through a pipeline, not from workstations.
+    best_practice: Post the plan on the pull request; fail on high-severity policy findings; require approval for production applies.
+    audit_requirement: Plans, approvals and applies are retained.
+    priority: high
+    monitoring:
+      - source: platform
+        signal: "apply outcomes and policy check results"
+    verification:
+      sources: [stage1_dataset, manual_review]
+      stage1_paths:
+        - "infrastructure.pipelines[].deploy_steps"
+        - "infrastructure.pipelines[].system"
+      criteria: A pipeline runs plan, policy check and gated apply.
+  - id: TF-004
+    title: No secrets in code, variables or outputs
+    extends: SEC-001
+    requirement: Secrets are not in .tf or .tfvars files; sensitive variables and outputs are marked sensitive, and secret values are read from a secrets manager at apply time or referenced by the resource.
+    best_practice: Use data sources for secrets; generate credentials in the platform where possible; treat state as sensitive.
+    audit_requirement: null
+    priority: critical
+    monitoring:
+      - source: platform
+        signal: "secret scanning results on Terraform files"
+    verification:
+      sources: [stage1_dataset]
+      stage1_paths:
+        - "infrastructure.secrets.hardcoded[].kind"
+        - "infrastructure.secrets.hardcoded[].location_type"
+        - "infrastructure.secrets.hardcoded[].evidence"
+      criteria: No hardcoded credential findings with location_type iac.
+  - id: TF-005
+    title: Stateful resources protected from accidental destruction
+    requirement: Databases, disks, buckets and keys have deletion protection and lifecycle prevent_destroy, backups enabled, and encryption configured in the resource definition.
+    best_practice: Use deletion_protection where the provider offers it; require explicit approval for destroy plans; tag resources with owner and environment.
+    audit_requirement: Destroy operations on stateful resources are approved and recorded.
+    priority: high
+    monitoring:
+      - source: platform
+        signal: "resource deletion events in cloud audit logs"
+    verification:
+      sources: [stage1_dataset]
+      stage1_paths:
+        - "infrastructure.terraform_resources[].type"
+        - "infrastructure.terraform_resources[].attributes"
+        - "infrastructure.encryption_audit.facts[].status"
+      criteria: Stateful resource types define deletion protection, backup and encryption attributes.
+  - id: TF-006
+    title: Drift detection and environment separation
+    requirement: Deployed infrastructure is compared with code on a schedule, and environments are separated by state and credentials, not by workspaces alone.
+    best_practice: Run scheduled plans and alert on drift; use separate projects or accounts per environment; keep modules generic and environment values in variables.
+    audit_requirement: null
+    priority: medium
+    monitoring:
+      - source: platform
+        signal: "scheduled plan drift reports"
+    verification:
+      sources: [manual_review]
+      criteria: Drift detection exists and environments are isolated.

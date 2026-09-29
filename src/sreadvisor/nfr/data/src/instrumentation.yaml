@@ -1,0 +1,823 @@
+description: >-
+  Tier 2 telemetry: metrics the application itself emits through library instrumentation (Micrometer, OpenTelemetry, Prometheus client
+  libraries, client-library metrics such as a Kafka consumer's lag), organised by the same tech-stack modules as the Master NFR List.
+  Everything here is tagged application level or library emitted. It is deliberately separate from the OneAgent default catalogue (tier 1).
+  Stage 4's dashboard generator uses it as the second tier next to OneAgent defaults and business-aware custom metrics (tier 3), so an SRE
+  sees for any service what OneAgent gives by default, what the application already emits, and what needs new instrumentation.
+provenance: >-
+  Curated from the libraries' own documentation (Micrometer, Spring Boot Actuator, OpenTelemetry, Prometheus client libraries, Apache Kafka,
+  Resilience4j, HikariCP, Caffeine, Quarkus, Spring Cloud Gateway). Metric names are the library-native names; where a metric reaches Dynatrace
+  through a registry or exporter the name may be transformed, so dashboards must be built from what the tenant actually receives.
+  Entries with confidence medium depend on library version or optional configuration.
+overlap_policy: >-
+  Metrics in this catalogue and the OneAgent default catalogue must never be assumed to overlap or to be duplicates: OneAgent measures from outside
+  the code with its own instrumentation, while these are emitted by the application. Where both measure something similar (for example request
+  duration), the dashboard shows the OneAgent signal by default and offers the library metric as an additional, separately named series.
+modules:
+  lang_java:
+    summary: Libraries that emit metrics from any JVM application, independent of the framework.
+    libraries:
+      - id: opentelemetry_java
+        library: OpenTelemetry Java (SDK or Java agent)
+        stage1_kind: opentelemetry
+        detect: {dependency: "io\\.opentelemetry|opentelemetry-"}
+        configuration: Enabled by adding the SDK or attaching the OpenTelemetry Java agent; instrumentations are selected through OTEL_* environment variables or otel.* system properties.
+        export: OTLP exporter to a collector or to the observability platform's OTLP endpoint.
+        metrics:
+          - name: "http.server.request.duration"
+            type: "histogram"
+            unit: "seconds"
+            description: "Duration of inbound HTTP requests (semantic convention)."
+          - name: "http.client.request.duration"
+            type: "histogram"
+            unit: "seconds"
+            description: "Duration of outbound HTTP requests."
+          - name: "db.client.operation.duration"
+            type: "histogram"
+            unit: "seconds"
+            description: "Duration of database client operations."
+            requires_category: "datastore"
+          - name: "jvm.memory.used"
+            type: "gauge"
+            unit: "bytes"
+            description: "Memory used per JVM pool."
+          - name: "jvm.gc.duration"
+            type: "histogram"
+            unit: "seconds"
+            description: "Duration of garbage collections."
+          - name: "jvm.thread.count"
+            type: "gauge"
+            unit: "threads"
+            description: "Number of executing threads."
+          - name: "jvm.cpu.recent_utilization"
+            type: "gauge"
+            description: "Recent CPU utilisation of the JVM process."
+      - id: dropwizard_metrics
+        library: Dropwizard Metrics
+        stage1_kind: dropwizard
+        detect: {dependency: "io\\.dropwizard\\.metrics|com\\.codahale\\.metrics"}
+        configuration: A MetricRegistry with reporters (JMX, Graphite, Prometheus bridge) and the JVM metric sets registered explicitly.
+        export: Reporters such as JMX, Graphite, console or a Prometheus or Micrometer bridge.
+        confidence: medium
+        metrics:
+          - name: "jvm.memory.*"
+            type: "gauge"
+            description: "JVM memory gauge set (MemoryUsageGaugeSet)."
+            enabled_by_default: false
+          - name: "jvm.gc.*"
+            type: "gauge"
+            description: "Garbage collector counts and times (GarbageCollectorMetricSet)."
+            enabled_by_default: false
+          - name: "jvm.threads.*"
+            type: "gauge"
+            description: "Thread state counts (ThreadStatesGaugeSet)."
+            enabled_by_default: false
+      - id: prometheus_simpleclient_java
+        library: Prometheus Java client
+        stage1_kind: prometheus_client
+        detect: {dependency: "io\\.prometheus:"}
+        configuration: DefaultExports.initialize() (simpleclient_hotspot) or the JVM metrics module registers the standard collectors; scraped from an HTTP endpoint.
+        export: Prometheus scrape endpoint (or OpenMetrics push).
+        metrics:
+          - name: "process_cpu_seconds_total"
+            type: "counter"
+            unit: "seconds"
+            description: "CPU time consumed by the process."
+          - name: "process_resident_memory_bytes"
+            type: "gauge"
+            unit: "bytes"
+            description: "Resident memory of the process."
+          - name: "process_open_fds"
+            type: "gauge"
+            description: "Open file descriptors."
+          - name: "jvm_memory_bytes_used"
+            type: "gauge"
+            unit: "bytes"
+            description: "JVM memory used by area."
+            enabled_by_default: false
+          - name: "jvm_gc_collection_seconds"
+            type: "summary"
+            unit: "seconds"
+            description: "Garbage collection time."
+            enabled_by_default: false
+          - name: "jvm_threads_current"
+            type: "gauge"
+            description: "Current thread count."
+            enabled_by_default: false
+      - id: resilience4j
+        library: Resilience4j
+        stage1_kind: resilience4j
+        detect: {dependency: "resilience4j"}
+        configuration: Circuit breaker, retry, bulkhead, rate limiter and time limiter instances configured in code or resilience4j.* properties; metrics registered when a Micrometer or Prometheus binder is on the classpath.
+        export: Through Micrometer (resilience4j-micrometer) or the Prometheus module.
+        metrics:
+          - name: "resilience4j.circuitbreaker.state"
+            type: "gauge"
+            description: "State of each circuit breaker (closed, open, half open)."
+          - name: "resilience4j.circuitbreaker.calls"
+            type: "timer"
+            description: "Calls by kind (successful, failed, ignored, not permitted)."
+          - name: "resilience4j.circuitbreaker.failure.rate"
+            type: "gauge"
+            unit: "percent"
+            description: "Failure rate of the sliding window."
+          - name: "resilience4j.circuitbreaker.slow.call.rate"
+            type: "gauge"
+            unit: "percent"
+            description: "Share of calls slower than the slow-call threshold."
+          - name: "resilience4j.retry.calls"
+            type: "counter"
+            description: "Calls by retry outcome (successful without retry, with retry, failed)."
+          - name: "resilience4j.bulkhead.available.concurrent.calls"
+            type: "gauge"
+            description: "Remaining bulkhead capacity."
+          - name: "resilience4j.ratelimiter.available.permissions"
+            type: "gauge"
+            description: "Remaining rate limiter permissions."
+          - name: "resilience4j.timelimiter.calls"
+            type: "counter"
+            description: "Time limiter outcomes (successful, timeout, failed)."
+  spring_boot:
+    summary: Micrometer through Spring Boot Actuator, with auto-configured binders for the JVM, HTTP, data sources, caches and messaging.
+    libraries:
+      - id: micrometer
+        library: Micrometer (Spring Boot Actuator)
+        stage1_kind: micrometer
+        detect: {dependency: "io\\.micrometer:micrometer-(core|registry-[\\w-]+)|:spring-boot-starter-actuator$"}
+        configuration: Auto-configured by spring-boot-starter-actuator; meters are visible at /actuator/metrics once the metrics endpoint is exposed; management.metrics.* properties tune tags, distribution statistics and enabled binders.
+        export: A Micrometer registry on the classpath (Prometheus, OTLP, Dynatrace, others) or the actuator endpoint; without a registry the meters exist but leave the process nowhere.
+        metrics:
+          - name: "jvm.memory.used"
+            type: "gauge"
+            unit: "bytes"
+            description: "JVM memory used per area and pool."
+          - name: "jvm.memory.max"
+            type: "gauge"
+            unit: "bytes"
+            description: "Maximum JVM memory per area and pool."
+          - name: "jvm.gc.pause"
+            type: "timer"
+            unit: "seconds"
+            description: "Garbage collection pause time."
+          - name: "jvm.gc.memory.allocated"
+            type: "counter"
+            unit: "bytes"
+            description: "Memory allocated in young generation between collections."
+          - name: "jvm.threads.live"
+            type: "gauge"
+            description: "Current live threads."
+          - name: "jvm.threads.peak"
+            type: "gauge"
+            description: "Peak live threads."
+          - name: "jvm.classes.loaded"
+            type: "gauge"
+            description: "Classes currently loaded."
+          - name: "process.cpu.usage"
+            type: "gauge"
+            description: "Recent CPU usage of the JVM process."
+          - name: "system.cpu.usage"
+            type: "gauge"
+            description: "Recent CPU usage of the whole system."
+          - name: "process.uptime"
+            type: "gauge"
+            unit: "seconds"
+            description: "Uptime of the JVM."
+          - name: "logback.events"
+            type: "counter"
+            description: "Log events by level."
+          - name: "http.server.requests"
+            type: "timer"
+            unit: "seconds"
+            description: "Duration of inbound HTTP requests by method, uri, status and outcome."
+            requires_category: "web"
+          - name: "http.client.requests"
+            type: "timer"
+            unit: "seconds"
+            description: "Duration of outbound HTTP requests made through Spring clients."
+            requires_category: "http_client"
+          - name: "hikaricp.connections.active"
+            type: "gauge"
+            description: "Connections in use."
+            requires_category: "datastore"
+          - name: "hikaricp.connections.idle"
+            type: "gauge"
+            description: "Idle connections in the pool."
+            requires_category: "datastore"
+          - name: "hikaricp.connections.pending"
+            type: "gauge"
+            description: "Threads waiting for a connection."
+            requires_category: "datastore"
+          - name: "hikaricp.connections.timeout"
+            type: "counter"
+            description: "Connection acquisition timeouts."
+            requires_category: "datastore"
+          - name: "hikaricp.connections.usage"
+            type: "timer"
+            unit: "seconds"
+            description: "Time connections are held before being returned."
+            requires_category: "datastore"
+          - name: "hikaricp.connections.acquire"
+            type: "timer"
+            unit: "seconds"
+            description: "Time to acquire a connection."
+            requires_category: "datastore"
+          - name: "jdbc.connections.active"
+            type: "gauge"
+            description: "Active connections reported by the data source metadata."
+            requires_category: "datastore"
+          - name: "spring.data.repository.invocations"
+            type: "timer"
+            unit: "seconds"
+            description: "Duration of Spring Data repository method calls."
+            requires_category: "datastore"
+            note: "Available in Spring Boot 3 with observation enabled for Spring Data."
+          - name: "cache.gets"
+            type: "counter"
+            description: "Cache lookups by result (hit, miss)."
+            requires_category: "cache"
+            enabled_by_default: false
+            note: "Needs statistics enabled on the cache provider (for example recordStats for Caffeine)."
+          - name: "cache.puts"
+            type: "counter"
+            description: "Entries added to the cache."
+            requires_category: "cache"
+            enabled_by_default: false
+          - name: "cache.evictions"
+            type: "counter"
+            description: "Cache evictions."
+            requires_category: "cache"
+            enabled_by_default: false
+          - name: "cache.size"
+            type: "gauge"
+            description: "Approximate number of entries."
+            requires_category: "cache"
+            enabled_by_default: false
+          - name: "tomcat.sessions.active.current"
+            type: "gauge"
+            description: "Current active sessions."
+            requires_category: "web"
+          - name: "tomcat.threads.busy"
+            type: "gauge"
+            description: "Busy request threads."
+            requires_category: "web"
+            note: "Needs server.tomcat.mbeanregistry.enabled=true."
+          - name: "tomcat.threads.current"
+            type: "gauge"
+            description: "Current request threads."
+            requires_category: "web"
+            note: "Needs server.tomcat.mbeanregistry.enabled=true."
+          - name: "executor.active"
+            type: "gauge"
+            description: "Active threads in each task executor."
+            enabled_by_default: true
+          - name: "executor.queued"
+            type: "gauge"
+            description: "Tasks queued for each task executor."
+          - name: "kafka.consumer.*"
+            type: "other"
+            description: "Kafka consumer client metrics bound by Micrometer (see the Kafka client library)."
+            requires_category: "messaging"
+          - name: "rabbitmq.consumed"
+            type: "counter"
+            description: "Messages consumed."
+            requires_category: "messaging"
+          - name: "rabbitmq.published"
+            type: "counter"
+            description: "Messages published."
+            requires_category: "messaging"
+
+  quarkus:
+    summary: Micrometer or SmallRye Metrics through Quarkus extensions, with datasource and fault tolerance metrics.
+    libraries:
+      - id: quarkus_micrometer
+        library: Quarkus Micrometer and SmallRye Metrics
+        detect: {dependency: "quarkus-micrometer|quarkus-smallrye-metrics"}
+        configuration: Add quarkus-micrometer (with a registry extension) or quarkus-smallrye-metrics; quarkus.micrometer.* and quarkus.datasource.metrics.enabled control binders.
+        export: Prometheus endpoint at /q/metrics or another Micrometer registry extension.
+        confidence: medium
+        metrics:
+          - name: "http.server.requests"
+            type: "timer"
+            unit: "seconds"
+            description: "Duration of inbound HTTP requests."
+          - name: "jvm.memory.used"
+            type: "gauge"
+            unit: "bytes"
+            description: "JVM memory used."
+          - name: "jvm.gc.pause"
+            type: "timer"
+            unit: "seconds"
+            description: "Garbage collection pauses."
+          - name: "agroal.active.count"
+            type: "gauge"
+            description: "Datasource connections in use."
+            requires_category: "datastore"
+            note: "Needs quarkus.datasource.metrics.enabled=true."
+          - name: "agroal.available.count"
+            type: "gauge"
+            description: "Datasource connections available."
+            requires_category: "datastore"
+          - name: "agroal.awaiting.count"
+            type: "gauge"
+            description: "Threads waiting for a datasource connection."
+            requires_category: "datastore"
+          - name: "ft.invocations.total"
+            type: "counter"
+            description: "Fault tolerance invocations by result."
+            requires_dependency: "fault-tolerance"
+          - name: "ft.circuitbreaker.state.current"
+            type: "gauge"
+            description: "Circuit breaker state."
+            requires_dependency: "fault-tolerance"
+          - name: "ft.retry.calls.total"
+            type: "counter"
+            description: "Retry outcomes."
+            requires_dependency: "fault-tolerance"
+  lang_python:
+    summary: Prometheus client and OpenTelemetry for Python services.
+    libraries:
+      - id: prometheus_client_python
+        library: prometheus_client (Python)
+        stage1_kind: prometheus_client
+        detect: {dependency: ":prometheus[-_]client$"}
+        configuration: Default collectors register on import; start_http_server or an ASGI/WSGI exporter exposes them; multiprocess mode needs PROMETHEUS_MULTIPROC_DIR.
+        export: Prometheus scrape endpoint.
+        metrics:
+          - name: "process_cpu_seconds_total"
+            type: "counter"
+            unit: "seconds"
+            description: "CPU time consumed by the process."
+          - name: "process_resident_memory_bytes"
+            type: "gauge"
+            unit: "bytes"
+            description: "Resident memory."
+          - name: "process_open_fds"
+            type: "gauge"
+            description: "Open file descriptors."
+          - name: "python_gc_objects_collected_total"
+            type: "counter"
+            description: "Objects collected by the garbage collector per generation."
+          - name: "python_gc_collections_total"
+            type: "counter"
+            description: "Garbage collections per generation."
+      - id: opentelemetry_python
+        library: OpenTelemetry Python
+        stage1_kind: opentelemetry
+        detect: {dependency: ":opentelemetry-|:opentelemetry\\."}
+        configuration: opentelemetry-instrument or explicit SDK setup with instrumentation packages for the frameworks and clients in use.
+        export: OTLP exporter.
+        confidence: medium
+        metrics:
+          - name: "http.server.duration"
+            type: "histogram"
+            unit: "milliseconds"
+            description: "Duration of inbound HTTP requests (name depends on the semantic convention version)."
+          - name: "http.client.duration"
+            type: "histogram"
+            unit: "milliseconds"
+            description: "Duration of outbound HTTP requests."
+          - name: "db.client.operation.duration"
+            type: "histogram"
+            unit: "seconds"
+            description: "Database client operation duration where a DB instrumentation is enabled."
+            enabled_by_default: false
+  lang_javascript_typescript:
+    summary: prom-client and OpenTelemetry for Node.js services.
+    libraries:
+      - id: prom_client_node
+        library: prom-client (Node.js)
+        stage1_kind: prometheus_client
+        detect: {dependency: ":prom-client$"}
+        configuration: collectDefaultMetrics() must be called to register the default Node.js metrics.
+        export: Prometheus scrape endpoint served from the application.
+        metrics:
+          - name: "process_cpu_user_seconds_total"
+            type: "counter"
+            unit: "seconds"
+            description: "User CPU time."
+          - name: "nodejs_eventloop_lag_seconds"
+            type: "gauge"
+            unit: "seconds"
+            description: "Event loop lag."
+          - name: "nodejs_heap_size_used_bytes"
+            type: "gauge"
+            unit: "bytes"
+            description: "V8 heap used."
+          - name: "nodejs_active_handles_total"
+            type: "gauge"
+            description: "Active libuv handles."
+          - name: "nodejs_gc_duration_seconds"
+            type: "histogram"
+            unit: "seconds"
+            description: "Garbage collection duration by kind."
+      - id: opentelemetry_node
+        library: OpenTelemetry Node.js
+        stage1_kind: opentelemetry
+        detect: {dependency: ":@opentelemetry/"}
+        configuration: The Node SDK with auto-instrumentations loaded before the application starts.
+        export: OTLP exporter.
+        confidence: medium
+        metrics:
+          - name: "http.server.duration"
+            type: "histogram"
+            unit: "milliseconds"
+            description: "Duration of inbound HTTP requests."
+          - name: "http.client.duration"
+            type: "histogram"
+            unit: "milliseconds"
+            description: "Duration of outbound HTTP requests."
+  lang_go:
+    summary: Prometheus client_golang and OpenTelemetry for Go services.
+    libraries:
+      - id: prometheus_client_golang
+        library: Prometheus client_golang
+        stage1_kind: prometheus_client
+        detect: {dependency: "github\\.com/prometheus/client_golang"}
+        configuration: The default registry includes the Go and process collectors; promhttp.Handler() exposes them.
+        export: Prometheus scrape endpoint.
+        metrics:
+          - name: "go_goroutines"
+            type: "gauge"
+            description: "Number of goroutines."
+          - name: "go_threads"
+            type: "gauge"
+            description: "Number of OS threads created."
+          - name: "go_gc_duration_seconds"
+            type: "summary"
+            unit: "seconds"
+            description: "Garbage collection pause durations."
+          - name: "go_memstats_alloc_bytes"
+            type: "gauge"
+            unit: "bytes"
+            description: "Bytes allocated and in use."
+          - name: "process_cpu_seconds_total"
+            type: "counter"
+            unit: "seconds"
+            description: "CPU time of the process."
+          - name: "promhttp_metric_handler_requests_total"
+            type: "counter"
+            description: "Scrapes of the metrics endpoint by status code."
+      - id: opentelemetry_go
+        library: OpenTelemetry Go
+        stage1_kind: opentelemetry
+        detect: {dependency: "go\\.opentelemetry\\.io"}
+        configuration: SDK setup with instrumentation packages (otelhttp, otelsql) and the runtime instrumentation package.
+        export: OTLP exporter.
+        confidence: medium
+        metrics:
+          - name: "http.server.request.duration"
+            type: "histogram"
+            unit: "seconds"
+            description: "Duration of inbound HTTP requests (otelhttp)."
+          - name: "go.goroutine.count"
+            type: "gauge"
+            description: "Goroutine count from the runtime instrumentation."
+            enabled_by_default: false
+  lang_rust:
+    summary: Prometheus, metrics and OpenTelemetry crates. OneAgent has no Rust sensor, so these are the primary source of application telemetry.
+    libraries:
+      - id: prometheus_rust
+        library: prometheus and metrics-exporter-prometheus crates
+        stage1_kind: prometheus_client
+        detect: {dependency: "^:(prometheus|metrics-exporter-prometheus)$"}
+        configuration: Register collectors explicitly (no default process collector unless the process feature is enabled) and serve them over HTTP.
+        export: Prometheus scrape endpoint.
+        confidence: medium
+        metrics:
+          - name: "process_cpu_seconds_total"
+            type: "counter"
+            unit: "seconds"
+            description: "CPU time when the process feature is enabled."
+            enabled_by_default: false
+      - id: opentelemetry_rust
+        library: OpenTelemetry and tracing-opentelemetry crates
+        stage1_kind: opentelemetry
+        detect: {dependency: "^:(opentelemetry|tracing-opentelemetry|opentelemetry-otlp)$"}
+        configuration: Initialise the SDK and a tracing subscriber layer; instrument handlers with tracing spans.
+        export: OTLP exporter.
+        confidence: medium
+        metrics:
+          - name: "http.server.request.duration"
+            type: "histogram"
+            unit: "seconds"
+            description: "Only when instrumented through middleware such as tower-http or axum-tracing-opentelemetry."
+            enabled_by_default: false
+      - id: tokio_metrics
+        library: tokio-metrics
+        detect: {dependency: "^:tokio-metrics$"}
+        configuration: RuntimeMonitor and TaskMonitor sampled in code.
+        export: Manually forwarded to a metrics crate or logs.
+        confidence: medium
+        metrics:
+          - name: "workers_count"
+            type: "gauge"
+            description: "Worker threads in the runtime."
+            enabled_by_default: false
+          - name: "global_queue_depth"
+            type: "gauge"
+            description: "Tasks waiting in the global queue."
+            enabled_by_default: false
+          - name: "total_busy_duration"
+            type: "counter"
+            unit: "seconds"
+            description: "Time workers spent busy."
+            enabled_by_default: false
+  microservices_architecture:
+    summary: Cross-service views come from distributed tracing, not from library metrics.
+    reason_none: End-to-end and service dependency views are produced by tracing (OneAgent PurePath or OpenTelemetry), which is covered by the language and framework modules.
+  event_driven_messaging:
+    summary: Broker client libraries that expose their own metrics.
+    libraries:
+      - id: spring_amqp_rabbit
+        library: Spring AMQP (RabbitMQ) through Micrometer
+        detect: {dependency: "spring-rabbit|amqp-client|spring-boot-starter-amqp"}
+        configuration: Micrometer binds RabbitMQ connection factory metrics when actuator and the AMQP starter are present; listener observation needs spring.rabbitmq.listener.simple.observation-enabled.
+        export: Through the Micrometer registry.
+        confidence: medium
+        metrics:
+          - name: "rabbitmq.connections"
+            type: "gauge"
+            description: "Open connections."
+          - name: "rabbitmq.channels"
+            type: "gauge"
+            description: "Open channels."
+          - name: "rabbitmq.published"
+            type: "counter"
+            description: "Messages published."
+          - name: "rabbitmq.consumed"
+            type: "counter"
+            description: "Messages consumed."
+          - name: "rabbitmq.acknowledged"
+            type: "counter"
+            description: "Messages acknowledged."
+          - name: "rabbitmq.rejected"
+            type: "counter"
+            description: "Messages rejected."
+  spring_boot_kafka:
+    summary: Kafka client metrics (consumer lag, commit latency, records per poll) and Spring for Apache Kafka observations. These are not OneAgent defaults.
+    libraries:
+      - id: kafka_client
+        library: Apache Kafka client metrics
+        stage1_kind: kafka_client
+        detect: {dependency: "org\\.apache\\.kafka:kafka-clients|:spring-kafka$|confluent-kafka|:kafkajs$|confluent\\.kafka|segmentio/kafka-go|shopify/sarama|:rdkafka"}
+        configuration: The Kafka consumer and producer maintain metrics internally; Spring Boot binds them to Micrometer (KafkaClientMetrics) when Actuator is present, and they are always readable over JMX.
+        export: Micrometer registry (names prefixed kafka.consumer.* and kafka.producer.*) or JMX.
+        metrics:
+          - name: "records-lag-max"
+            type: "gauge"
+            description: "Maximum record lag across the consumer's partitions (micrometer kafka.consumer.fetch.manager.records.lag.max)."
+            requires_category: "messaging"
+          - name: "records-consumed-rate"
+            type: "gauge"
+            description: "Records consumed per second."
+            requires_category: "messaging"
+          - name: "records-per-request-avg"
+            type: "gauge"
+            description: "Average records per fetch request (records consumed per poll)."
+            requires_category: "messaging"
+          - name: "fetch-latency-avg"
+            type: "gauge"
+            unit: "milliseconds"
+            description: "Average fetch request latency."
+            requires_category: "messaging"
+          - name: "commit-latency-avg"
+            type: "gauge"
+            unit: "milliseconds"
+            description: "Average offset commit latency."
+            requires_category: "messaging"
+          - name: "commit-rate"
+            type: "gauge"
+            description: "Offset commits per second."
+            requires_category: "messaging"
+          - name: "rebalance-rate-per-hour"
+            type: "gauge"
+            description: "Consumer group rebalances per hour."
+            requires_category: "messaging"
+          - name: "assigned-partitions"
+            type: "gauge"
+            description: "Partitions currently assigned to the consumer."
+            requires_category: "messaging"
+          - name: "record-send-rate"
+            type: "gauge"
+            description: "Records sent per second by the producer."
+            requires_category: "messaging"
+          - name: "record-error-rate"
+            type: "gauge"
+            description: "Failed record sends per second."
+            requires_category: "messaging"
+          - name: "request-latency-avg"
+            type: "gauge"
+            unit: "milliseconds"
+            description: "Average producer request latency."
+            requires_category: "messaging"
+          - name: "batch-size-avg"
+            type: "gauge"
+            unit: "bytes"
+            description: "Average producer batch size."
+            requires_category: "messaging"
+      - id: spring_kafka_observation
+        library: Spring for Apache Kafka observations
+        detect: {dependency: ":spring-kafka$"}
+        configuration: Set spring.kafka.listener.observation-enabled and spring.kafka.template.observation-enabled to record listener and template timers.
+        export: Through the Micrometer registry and tracing bridge.
+        confidence: medium
+        metrics:
+          - name: "spring.kafka.listener"
+            type: "timer"
+            unit: "seconds"
+            description: "Time spent in each Kafka listener invocation."
+            enabled_by_default: false
+          - name: "spring.kafka.template"
+            type: "timer"
+            unit: "seconds"
+            description: "Time spent sending through KafkaTemplate."
+            enabled_by_default: false
+  oauth2_identity:
+    summary: Spring Security observations and client libraries.
+    libraries:
+      - id: spring_security_observations
+        library: Spring Security observations (Micrometer)
+        detect: {dependency: "spring-security"}
+        configuration: Observations for filter chains, authentication and authorisation are recorded through the Micrometer observation registry in Spring Security 6 and later.
+        export: Through the Micrometer registry.
+        confidence: medium
+        metrics:
+          - name: "spring.security.filterchains"
+            type: "timer"
+            unit: "seconds"
+            description: "Time in the security filter chain."
+            enabled_by_default: false
+          - name: "spring.security.authorizations"
+            type: "timer"
+            unit: "seconds"
+            description: "Authorisation decisions."
+            enabled_by_default: false
+          - name: "spring.security.authentications"
+            type: "timer"
+            unit: "seconds"
+            description: "Authentication attempts."
+            enabled_by_default: false
+  jwt_authentication:
+    summary: JWT libraries do not emit metrics.
+    reason_none: JWT parsing and verification libraries (jjwt, nimbus-jose-jwt, PyJWT, jsonwebtoken) emit no metrics; rejected-token counts must be added as custom instrumentation.
+  zero_trust:
+    summary: Enforcement happens in the network or mesh layer.
+    reason_none: mTLS and policy decisions are produced by proxies and policy engines, not by application libraries.
+  source_github:
+    summary: Not a runtime component.
+    reason_none: Source control and workflow telemetry come from the platform, not from application libraries.
+  cicd_harness:
+    summary: Not a runtime component.
+    reason_none: Pipeline telemetry comes from the CI/CD platform.
+  cicd_ucd:
+    summary: Not a runtime component.
+    reason_none: Deployment process telemetry comes from the deployment platform.
+  iac_terraform:
+    summary: Not a runtime component.
+    reason_none: Infrastructure code emits no application metrics.
+  docker:
+    summary: Container runtime metrics come from the runtime and platform.
+    reason_none: Image and container resource metrics are produced by the container runtime and orchestrator, not application libraries.
+  kubernetes:
+    summary: Cluster metrics come from platform exporters.
+    reason_none: Cluster and workload metrics come from kubelet, kube-state-metrics and the observability platform's Kubernetes integration, not from libraries inside the application.
+  gke:
+    summary: "Cluster metrics come from Google Cloud and the platform."
+    reason_none: "GKE cluster and node metrics are produced by Google Cloud Monitoring and managed Prometheus, not by application libraries."
+  openshift:
+    summary: Cluster metrics come from the OpenShift monitoring stack.
+    reason_none: Platform metrics are produced by the cluster monitoring stack, not by application libraries.
+  rest_apis:
+    summary: HTTP server and client metrics are emitted by the framework instrumentation.
+    reason_none: Request rate, latency and status metrics come from the web framework's instrumentation (for example Micrometer http.server.requests) and are listed under the framework modules.
+  api_gateway:
+    summary: Gateway libraries that emit their own metrics.
+    libraries:
+      - id: spring_cloud_gateway
+        library: Spring Cloud Gateway through Micrometer
+        detect: {dependency: "spring-cloud-starter-gateway|spring-cloud-gateway"}
+        configuration: Set spring.cloud.gateway.metrics.enabled=true with Actuator and a Micrometer registry.
+        export: Through the Micrometer registry.
+        confidence: medium
+        metrics:
+          - name: "spring.cloud.gateway.requests"
+            type: "timer"
+            unit: "seconds"
+            description: "Gateway request duration by route, outcome and status."
+            enabled_by_default: false
+  service_mesh:
+    summary: Proxy metrics come from the mesh, not application libraries.
+    reason_none: Retry, timeout and mTLS counters are emitted by the sidecar proxy and control plane.
+  data_relational:
+    summary: Connection pool libraries expose the saturation metrics that OneAgent does not capture.
+    libraries:
+      - id: jdbc_pool_metrics
+        library: JDBC connection pool metrics (HikariCP, DBCP, c3p0, UCP)
+        detect: {dependency: "hikaricp|dbcp|c3p0|:ucp$|oracle\\.database\\.jdbc:ucp"}
+        configuration: HikariCP publishes to Micrometer or Prometheus when a metrics tracker is set; other pools expose JMX MBeans.
+        export: Micrometer, Prometheus or JMX.
+        confidence: medium
+        metrics:
+          - name: "hikaricp.connections.active"
+            type: "gauge"
+            description: "Connections in use."
+          - name: "hikaricp.connections.pending"
+            type: "gauge"
+            description: "Threads waiting for a connection."
+          - name: "hikaricp.connections.timeout"
+            type: "counter"
+            description: "Acquisition timeouts."
+          - name: "hikaricp.connections.usage"
+            type: "timer"
+            unit: "seconds"
+            description: "Time connections are held."
+
+  data_postgres:
+    summary: The PostgreSQL JDBC and native drivers emit no metrics.
+    reason_none: Driver libraries (pgjdbc, psycopg, pgx) emit no metrics; pool metrics are under the relational module and engine metrics come from exporters or platform extensions.
+  data_oracle:
+    summary: Oracle UCP exposes pool statistics through JMX.
+    libraries:
+      - id: oracle_ucp
+        library: Oracle Universal Connection Pool statistics
+        detect: {dependency: "oracle\\.database\\.jdbc:ucp|:ucp$"}
+        configuration: Enable UCP MBeans (setJMXEnabled) to expose pool statistics over JMX.
+        export: JMX (bridge to Micrometer or Prometheus with a JMX exporter).
+        confidence: medium
+        metrics:
+          - name: "AvailableConnectionsCount"
+            type: "gauge"
+            description: "Connections available in the pool."
+            enabled_by_default: false
+          - name: "BorrowedConnectionsCount"
+            type: "gauge"
+            description: "Connections currently borrowed."
+            enabled_by_default: false
+          - name: "PendingRequestsCount"
+            type: "gauge"
+            description: "Requests waiting for a connection."
+            enabled_by_default: false
+  data_sqlserver:
+    summary: SQL Server drivers emit no metrics.
+    reason_none: The Microsoft JDBC, ADO.NET and ODBC drivers emit no metrics; pool metrics are under the relational module and engine metrics come from platform extensions.
+  data_bigquery:
+    summary: BigQuery client libraries emit no metrics of their own.
+    reason_none: Google Cloud client libraries offer optional OpenTelemetry tracing but no standard metric set; job and slot metrics come from the Google Cloud integration.
+  data_gcp_managed:
+    summary: Connectors emit no metrics; managed database metrics come from Google Cloud.
+    reason_none: The Cloud SQL connectors and proxy log connection events but do not publish application metrics; instance metrics come from Google Cloud monitoring.
+  caching:
+    summary: Cache libraries expose hit ratio, size and eviction statistics when statistics are enabled.
+    libraries:
+      - id: caffeine_stats
+        library: Caffeine cache statistics
+        detect: {dependency: "caffeine"}
+        configuration: Statistics are off by default; enable recordStats() (Spring Boot spring.cache.caffeine.spec=recordStats) and register the cache with Micrometer's CaffeineCacheMetrics.
+        export: Through Micrometer (cache.* meters).
+        metrics:
+          - name: "cache.gets"
+            type: "counter"
+            description: "Lookups by result (hit or miss)."
+            enabled_by_default: false
+          - name: "cache.size"
+            type: "gauge"
+            description: "Estimated number of entries."
+            enabled_by_default: false
+          - name: "cache.evictions"
+            type: "counter"
+            description: "Entries evicted."
+            enabled_by_default: false
+          - name: "cache.eviction.weight"
+            type: "counter"
+            description: "Total weight of evicted entries."
+            enabled_by_default: false
+          - name: "cache.load"
+            type: "timer"
+            unit: "seconds"
+            description: "Time spent loading entries."
+            enabled_by_default: false
+      - id: lettuce_metrics
+        library: Lettuce (Redis client) command metrics
+        detect: {dependency: "lettuce"}
+        configuration: MicrometerCommandLatencyRecorder is registered with the client resources (Spring Boot configures it when Micrometer is present).
+        export: Through the Micrometer registry.
+        confidence: medium
+        metrics:
+          - name: "lettuce.command.completion"
+            type: "timer"
+            unit: "seconds"
+            description: "Time from command dispatch to completion."
+          - name: "lettuce.command.firstresponse"
+            type: "timer"
+            unit: "seconds"
+            description: "Time to first response."
+  observability_dynatrace:
+    summary: Export paths that carry application metrics into Dynatrace (they emit nothing themselves).
+    libraries:
+      - id: dynatrace_metric_export
+        library: Micrometer Dynatrace registry and OpenTelemetry OTLP export to Dynatrace
+        detect: {dependency: "micrometer-registry-dynatrace|dynatrace"}
+        configuration: Add the Dynatrace registry (or an OTLP exporter pointed at the tenant) and configure the endpoint and token through the secrets mechanism.
+        export: Dynatrace metric ingest API or OTLP endpoint.
+        confidence: medium
+        metrics: []

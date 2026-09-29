@@ -1,0 +1,85 @@
+id: microservices_architecture
+title: Microservices architecture
+layer: tech_stack
+category: architecture
+description: Requirements that arise from running many independently deployed services that call each other. Applies when the fingerprint shows inter-service communication.
+extends: [baseline]
+detect:
+  - flow_dependency: http_service
+  - flow_dependency: external_api
+  - infra: service_mesh
+  - dependency: "spring-cloud|micronaut-discovery|eureka|consul|dapr|zuul"
+  - entry_point: grpc
+recognizes:
+  - dependency: "spring-cloud|eureka|consul|dapr"
+catalogue_refs: [oneagent_default, application_level]
+entries:
+  - id: MSA-001
+    title: Bounded synchronous call chains and no distributed monolith
+    extends: BASE-CB-001
+    requirement: Synchronous request chains across services are shallow, fan-out is bounded, and no service calls back into its own callers; long chains use asynchronous messaging or aggregation.
+    best_practice: Prefer at most two or three hops for user requests; use parallel calls with a shared deadline; keep dependency graphs acyclic.
+    audit_requirement: Service dependency map is reviewed at architecture change.
+    priority: high
+    monitoring:
+      - source: oneagent_default
+        signal: "service topology and PurePath call depth"
+    verification:
+      sources: [stage1_dataset, runtime_telemetry]
+      stage1_paths:
+        - "repositories[].transaction_flows[].dependencies[].kind"
+        - "repositories[].transaction_flows[].steps[].target_type"
+      criteria: Outbound http_service dependencies per flow are few and no cycles appear in the provider topology.
+  - id: MSA-002
+    title: Distributed tracing context propagated across every hop
+    extends: BASE-LOG-002
+    requirement: W3C trace context (or the platform's equivalent) propagates through HTTP, messaging and asynchronous boundaries so a transaction can be followed end to end.
+    best_practice: Rely on OneAgent for automatic propagation of supported clients; add OpenTelemetry propagation for unsupported ones; propagate through message headers.
+    audit_requirement: Trace retention supports incident review.
+    priority: high
+    monitoring:
+      - source: oneagent_default
+        signal: "PurePath distributed traces and service flow"
+    verification:
+      sources: [runtime_telemetry]
+      criteria: Traces from an entry point include spans for each downstream service.
+  - id: MSA-003
+    title: Each service owns its data
+    requirement: A service is the only writer of its data store; other services access data through its API or events, not by sharing tables.
+    best_practice: Separate schemas or databases per service; publish change events; avoid cross-service joins and distributed transactions (use sagas or an outbox).
+    audit_requirement: Data ownership per service is documented.
+    priority: medium
+    monitoring:
+      - source: oneagent_default
+        signal: "database service call topology showing which services touch each database"
+    verification:
+      sources: [runtime_telemetry, manual_review]
+      criteria: Each database appears connected to a single service in the topology.
+  - id: MSA-004
+    title: Versioned contracts and backward-compatible change
+    extends: BASE-RETRY-001
+    requirement: Interfaces between services are versioned and evolve backward-compatibly, so services can deploy independently and roll back without lockstep releases.
+    best_practice: Additive changes only within a version; consumer-driven contract tests in CI; deprecate with telemetry on old-version use.
+    audit_requirement: Breaking-change approvals are recorded.
+    priority: high
+    monitoring:
+      - source: custom_instrumentation
+        signal: "calls per API version"
+    verification:
+      sources: [manual_review, stage1_dataset]
+      stage1_paths:
+        - "repositories[].entry_points[].route"
+      criteria: Routes carry a version and contract tests exist in the pipeline.
+  - id: MSA-005
+    title: Per-service SLOs and named ownership
+    extends: BASE-MON-003
+    requirement: Each service has an owner, an SLO for its entry points, and an on-call route, and dependencies' SLOs are at least as strict as what depends on them.
+    best_practice: Compute composite availability from the dependency chain; tag services with owner and tier in the observability platform.
+    audit_requirement: Ownership and SLO records reviewed periodically.
+    priority: medium
+    monitoring:
+      - source: platform
+        signal: "SLO status per service"
+    verification:
+      sources: [manual_review]
+      criteria: Owner and SLO exist for the service and its critical dependencies.

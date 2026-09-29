@@ -1,0 +1,73 @@
+id: openshift
+title: OpenShift
+layer: tech_stack
+category: iac_container
+description: Requirements specific to Red Hat OpenShift, in addition to the Kubernetes module. Applies where OpenShift resources (DeploymentConfig, Route, ImageStream) or oc-based deployment steps are found.
+extends: [baseline, kubernetes]
+detect:
+  - infra: openshift
+recognizes:
+  - infra: openshift
+catalogue_refs: [oneagent_default, application_level]
+entries:
+  - id: OSH-001
+    title: Workloads compatible with the restricted security context constraint
+    requirement: Applications run under the restricted (or restricted-v2) SCC with an arbitrary non-root UID, not a custom SCC with elevated privileges, and images do not depend on a fixed UID or writable root paths.
+    best_practice: Make writable directories group-writable for GID 0; avoid anyuid and privileged SCCs; review any SCC grants to service accounts.
+    audit_requirement: SCC grants are reviewed and recorded.
+    priority: high
+    monitoring:
+      - source: platform
+        signal: "pods rejected by SCC admission"
+    verification:
+      sources: [stage1_dataset, manual_review]
+      stage1_paths:
+        - "infrastructure.workloads[].containers[].run_as_non_root"
+        - "infrastructure.workloads[].service_account"
+      criteria: No workload requires an elevated SCC.
+  - id: OSH-002
+    title: Routes use TLS with redirect and appropriate termination
+    extends: ENC-003
+    requirement: Routes terminate TLS (edge or re-encrypt for sensitive traffic, passthrough where end-to-end TLS is required) and redirect insecure traffic, with certificates managed centrally.
+    best_practice: Use insecureEdgeTerminationPolicy Redirect; re-encrypt to the pod for sensitive data; avoid unencrypted routes.
+    audit_requirement: null
+    priority: high
+    monitoring:
+      - source: platform
+        signal: "router error rate and certificate expiry"
+    verification:
+      sources: [stage1_dataset]
+      stage1_paths:
+        - "infrastructure.ingresses[].tls_hosts"
+        - "infrastructure.ingresses[].hosts"
+      criteria: Every route or ingress host has TLS.
+  - id: OSH-003
+    title: Deployment resources use Deployment, not deprecated DeploymentConfig
+    requirement: New workloads use Deployment objects with the standard rollout strategy; existing DeploymentConfigs have a migration plan, since DeploymentConfig is deprecated.
+    best_practice: Migrate to Deployment with rolling or recreate strategy and ImageStream tag triggers where needed.
+    audit_requirement: null
+    priority: medium
+    monitoring:
+      - source: platform
+        signal: "rollout status per workload"
+    verification:
+      sources: [stage1_dataset]
+      stage1_paths:
+        - "infrastructure.workloads[].kind"
+        - "infrastructure.workloads[].strategy"
+      criteria: Workload kinds are Deployment or StatefulSet; DeploymentConfig is a finding.
+  - id: OSH-004
+    title: Project quotas, image provenance and rollback tooling
+    requirement: Projects have quotas and limit ranges, images come from trusted registries or ImageStreams with pinned tags or digests, and rollback is possible through oc rollout undo or a redeploy of the previous image.
+    best_practice: Use ImageStream tags per release; enable image signature verification; monitor project quota use.
+    audit_requirement: Image import and deployment history retained.
+    priority: medium
+    monitoring:
+      - source: platform
+        signal: "project quota usage and image import failures"
+    verification:
+      sources: [stage1_dataset, manual_review]
+      stage1_paths:
+        - "infrastructure.workloads[].containers[].image"
+        - "infrastructure.pipelines[].rollback.mode"
+      criteria: Images are pinned and a rollback path exists.

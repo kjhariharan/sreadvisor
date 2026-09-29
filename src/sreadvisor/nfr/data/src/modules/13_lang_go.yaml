@@ -1,0 +1,89 @@
+id: lang_go
+title: Go
+layer: tech_stack
+category: language
+description: Runtime requirements for services written in Go (net/http, Gin, Echo, Fiber, Chi and similar are covered here).
+extends: [baseline]
+detect:
+  - language: Go
+recognizes:
+  - framework: [Gin, Echo, Fiber, Chi]
+  - dependency: "github\\.com/(gin-gonic|labstack|gofiber|go-chi|prometheus|sony|cenkalti|avast|jackc|lib/pq|redis|go-redis)"
+catalogue_refs: [oneagent_default, application_level]
+entries:
+  - id: LGO-001
+    title: Context deadlines and explicit server and client timeouts
+    extends: BASE-TO-001
+    requirement: Every outbound call carries a context with a deadline, http.Client has a Timeout, and http.Server sets ReadHeaderTimeout, ReadTimeout, WriteTimeout and IdleTimeout (the defaults are none).
+    best_practice: Derive downstream deadlines from the request context; cancel on client disconnect; never use http.DefaultClient in production code.
+    audit_requirement: null
+    priority: critical
+    monitoring:
+      - source: oneagent_default
+        signal: "request response time and failure rate"
+        detail: "for standard library HTTP servers and clients"
+    verification:
+      sources: [stage1_dataset, manual_review]
+      stage1_paths:
+        - "repositories[].reliability_patterns[].pattern"
+        - "repositories[].fingerprint.dependencies[].name"
+      criteria: Server and client timeouts are configured in code.
+  - id: LGO-002
+    title: Bounded concurrency and no goroutine leaks
+    requirement: Goroutine creation on request paths is bounded (worker pools, semaphores, errgroup limits), every goroutine has a termination condition, and goroutine count is monitored.
+    best_practice: Pass context to every goroutine; use errgroup with SetLimit; test with goleak; alert on monotonic goroutine growth.
+    audit_requirement: null
+    priority: high
+    monitoring:
+      - source: library_emitted
+        signal: "go_goroutines"
+        detail: "Prometheus client Go collector"
+      - source: oneagent_default
+        signal: "goroutine count where the Go sensor is active"
+        detail: "confirm in the tenant"
+    verification:
+      sources: [manual_review, runtime_telemetry]
+      criteria: Goroutine count is stable under steady load and no unbounded spawn per request is present.
+  - id: LGO-003
+    title: Container-aware GOMAXPROCS and memory limit
+    extends: BASE-MON-002
+    requirement: GOMAXPROCS matches the container CPU limit and GOMEMLIMIT is set below the container memory limit, so the scheduler and garbage collector respect the container.
+    best_practice: Use a Go release with container-aware GOMAXPROCS or automaxprocs; set GOMEMLIMIT to roughly 90 percent of the limit; monitor GC CPU share.
+    audit_requirement: null
+    priority: medium
+    monitoring:
+      - source: library_emitted
+        signal: "go_memstats and go_gc_duration_seconds"
+    verification:
+      sources: [stage1_dataset, manual_review]
+      stage1_paths:
+        - "infrastructure.workloads[].containers[].limits"
+        - "repositories[].fingerprint.runtime_versions"
+      criteria: CPU and memory limits are set and the runtime honours them.
+  - id: LGO-004
+    title: Graceful shutdown of servers and workers
+    extends: BASE-SHUT-001
+    requirement: On SIGTERM the service calls Server.Shutdown with a timeout, stops consumers and background workers, and flushes telemetry before exit.
+    best_practice: Use signal.NotifyContext; align the shutdown timeout with terminationGracePeriodSeconds.
+    audit_requirement: null
+    priority: high
+    monitoring:
+      - source: platform
+        signal: "errors during rollouts"
+    verification:
+      sources: [stage1_dataset, manual_review]
+      stage1_paths:
+        - "infrastructure.workloads[].termination_grace_period_seconds"
+      criteria: Shutdown handling exists and the grace period exceeds the shutdown timeout.
+  - id: LGO-005
+    title: Diagnostics endpoints protected
+    requirement: pprof and expvar endpoints are not exposed on the public listener; where enabled they bind to a separate internal port.
+    best_practice: Serve diagnostics on localhost or an authenticated admin port; enable continuous profiling through the platform instead.
+    audit_requirement: Access to diagnostics endpoints is logged.
+    priority: medium
+    monitoring:
+      - source: logs
+        signal: "requests to /debug endpoints"
+    verification:
+      sources: [manual_review]
+      criteria: Diagnostics endpoints are not reachable from the public listener.

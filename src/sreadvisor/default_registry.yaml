@@ -1,0 +1,81 @@
+# Registry: the set of active observability providers, NFR modules and output sinks,
+# plus model and analysis settings. Enabling a new provider or output format is a change
+# to this file (point `class` at your implementation), not a change to pipeline code.
+# Override with `--registry path/to/registry.yaml` or $SREADVISOR_REGISTRY.
+
+# Model backend switch. Every agent gets its model through model_provider.get_model().
+#   ollama  : LiteLlm("ollama_chat/<model>")               local development
+#   gemini  : ADK Gemini + API key (GEMINI_API_KEY)         production-parity check
+#   vertex  : ADK Gemini + Application Default Creds        production deployment
+#   gateway : LiteLlm against an internal AI gateway, model given in LiteLLM's own "<provider>/<name>" form
+#             (e.g. "openai/gpt-4o", "anthropic/claude-sonnet-4-5", "gemini/gemini-2.5-flash") — any provider
+#             the gateway itself can route to; switching models is this one config value, never a code change.
+# $SREADVISOR_MODEL_BACKEND overrides `backend`.
+model:
+  backend: ollama
+  ollama:
+    model: gemma4:latest          # the brief also lists qwen3-coder:30b; set it here once pulled
+    num_ctx: 16384                # context window; Ollama's 4k default truncates tool-using agent turns
+  gemini:
+    model: gemini-2.5-flash
+    api_key_env: GEMINI_API_KEY
+  vertex:
+    model: gemini-2.5-flash
+    project: null                  # or export GOOGLE_CLOUD_PROJECT
+    location: us-central1
+  gateway:
+    model: openai/gpt-4o           # LiteLLM "<provider>/<name>"; the gateway decides what actually serves it
+    api_base: null                 # the internal gateway's URL, or export AI_GATEWAY_API_BASE
+    api_key_env: AI_GATEWAY_API_KEY # name of the env var holding the gateway's own API key, if it needs one
+    ssl_verify: true                # false to skip certificate verification (e.g. a trusted internal self-signed endpoint)
+    ca_cert_path: null              # path to a CA bundle to verify against, when the gateway's cert isn't in the system trust store
+
+providers:
+  dynatrace:
+    class: sreadvisor.providers.dynatrace.DynatraceProvider
+    enabled: true
+  static:
+    class: sreadvisor.providers.static.StaticProvider
+    enabled: true
+
+# The Master NFR List and the two telemetry catalogues are data (nfr/data/*.json), not code. NFR modules registered here are the
+# Stage 3 evaluators that load them; each is a class implementing nfr.base.NFRModule.
+nfr_modules:
+  gap_analysis_pass_1:              # Stage 3: LLM assessment of each applicable Master NFR List entry against the Stage 1 dataset
+    class: sreadvisor.gap.pass1.GapAnalysisPass1
+    enabled: true
+    options: {}                     # optional: master_list (path to an alternative Master NFR List JSON)
+  gap_analysis_pass_2:              # Stage 6: Pass 1 plus Stage 5's runtime cross-validation (see `sreadvisor gaps --runtime`)
+    class: sreadvisor.gap.pass2.GapAnalysisPass2
+    enabled: true
+    options: {}
+
+output_sinks:
+  json_file:
+    class: sreadvisor.sinks.json_file.JsonFileSink
+    enabled: true
+  console_summary:
+    class: sreadvisor.sinks.console.ConsoleSummarySink
+    enabled: true
+  nfr_report:                       # NFR coverage report + coverage JSON for Stage 3/4 (unrecognized tech stacks, telemetry tiers)
+    class: sreadvisor.sinks.nfr_report.NfrReportSink
+    enabled: true
+    options: {}                     # optional: master_list, oneagent_catalogue, app_catalogue (paths to alternative JSON files)
+
+analysis:
+  # Graphify's structural extraction is deterministic (tree-sitter, no LLM calls).
+  graph:
+    parallel: false               # multiprocessing on Windows needs a __main__ guard; sequential is fast enough
+    exclude_tests: true
+  llm:
+    concurrency: 1                # local Ollama serves one request at a time
+    max_chain_nodes: 30           # cap per entry point call chain given to the flow tracer
+    max_body_lines: 40            # cap per method body shown to the LLM
+    cache: true                   # cache LLM results keyed by prompt + model
+    max_retries: 1                # JSON repair attempts
+    temperature: 0.0              # every agent's sampling temperature; 0 keeps findings reproducible across a re-run
+    max_output_tokens: 8192       # every agent's generation cap
+  gap:
+    max_evidence_items: 30        # list items shown per dataset path in an assessor prompt
+    max_evidence_chars: 6000      # cap on the projected dataset evidence per requirement
+    verify_met: true              # re-check each "met" verdict by trying to disprove it

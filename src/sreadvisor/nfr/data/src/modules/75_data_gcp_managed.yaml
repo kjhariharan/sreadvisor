@@ -1,0 +1,92 @@
+id: data_gcp_managed
+title: Managed cloud databases on Google Cloud
+layer: tech_stack
+category: data
+description: Requirements for managed databases on Google Cloud (Cloud SQL, AlloyDB, Spanner, Bigtable, Firestore, Memorystore) that GKE workloads connect to. GKE itself is the gke module.
+extends: [baseline, data_relational]
+detect:
+  - terraform: "google_sql|google_spanner|google_alloydb|google_bigtable|google_firestore|google_redis"
+  - dependency: "cloud-sql|spring-cloud-gcp|google-cloud-sql|cloud-sql-connector|cloud-spanner|alloydb"
+  - image: "cloud-sql-proxy|alloydb-auth-proxy"
+recognizes:
+  - infra: gcp
+  - terraform: "^google"
+catalogue_refs: [oneagent_default, application_level]
+entry_extensions:
+  gcp_resource: "the Google Cloud resource type or setting involved"
+entries:
+  - id: GCPDB-001
+    title: High availability configuration for the managed database
+    extends: RDB-005
+    gcp_resource: google_sql_database_instance availability_type = REGIONAL, AlloyDB, Spanner regional or multi-region
+    requirement: Production Cloud SQL instances use regional (high availability) configuration, and AlloyDB or Spanner are deployed in a topology that meets the availability target, with maintenance windows chosen deliberately.
+    best_practice: Test failover; use read replicas for read scale; set maintenance windows and deny-maintenance periods around peak business events.
+    audit_requirement: null
+    priority: critical
+    monitoring:
+      - source: platform
+        signal: "Cloud Monitoring instance state, replication lag and failover events"
+      - source: oneagent_default
+        signal: "database call failure rate during failover as seen by callers"
+    verification:
+      sources: [stage1_dataset]
+      stage1_paths:
+        - "infrastructure.terraform_resources[].type"
+        - "infrastructure.terraform_resources[].attributes"
+      criteria: availability_type is REGIONAL (or equivalent HA setting) for production database resources.
+  - id: GCPDB-002
+    title: Private connectivity and authenticated connection through the connector or proxy
+    extends: ENC-004
+    gcp_resource: private IP, Cloud SQL Auth Proxy or language connectors, IAM database authentication
+    requirement: Applications reach managed databases over private IP through the Cloud SQL Auth Proxy or a language connector (mutual TLS and IAM authorisation), preferably with IAM database authentication instead of static passwords, and public IP access is disabled or restricted.
+    best_practice: Run the proxy as a sidecar or use the in-process connector; give each workload its own service account through Workload Identity; keep authorised networks empty.
+    audit_requirement: Connection and IAM authentication events are captured in Cloud Audit Logs.
+    priority: high
+    monitoring:
+      - source: platform
+        signal: "connections by source and authentication method"
+    verification:
+      sources: [stage1_dataset]
+      stage1_paths:
+        - "infrastructure.terraform_resources[].attributes"
+        - "infrastructure.workloads[].containers[].image"
+        - "repositories[].fingerprint.dependencies[].name"
+        - "repositories[].secrets.sourced_from[].mechanism"
+      criteria: ipv4_enabled is false or authorised networks are narrow, and the connector or proxy is used.
+  - id: GCPDB-003
+    title: Backups, point-in-time recovery, deletion protection and encryption
+    extends: RDB-004
+    gcp_resource: backup_configuration, point_in_time_recovery_enabled, deletion_protection, encryption_key_name
+    requirement: Instances have automated backups with point-in-time recovery enabled, deletion protection set, and customer-managed encryption keys where policy requires.
+    best_practice: Retain backups per policy; test restore into a new instance; protect keys with separate IAM.
+    audit_requirement: Backup and key usage logs retained.
+    priority: critical
+    monitoring:
+      - source: platform
+        signal: "backup status and last successful backup age"
+    verification:
+      sources: [stage1_dataset]
+      stage1_paths:
+        - "infrastructure.terraform_resources[].attributes"
+        - "infrastructure.encryption_audit.facts[].status"
+      criteria: Backup, PITR and deletion protection attributes are set on database resources.
+  - id: GCPDB-004
+    title: Connection limits sized for proxies and replicas
+    extends: PG-001
+    gcp_resource: max_connections database flag, connection pooling (managed pooler)
+    requirement: Connection pool sizes multiplied by replica counts, plus proxy overhead, stay within the instance connection limit, and managed connection pooling is used when many replicas connect.
+    best_practice: Use built-in managed connection pooling where available; alert at 80 percent of max connections.
+    audit_requirement: null
+    priority: high
+    monitoring:
+      - source: platform
+        signal: "database connections versus limit"
+      - source: library_emitted
+        signal: "application pool saturation"
+    verification:
+      sources: [stage1_dataset]
+      stage1_paths:
+        - "repositories[].application_capacity[].value"
+        - "infrastructure.autoscalers[].max_replicas"
+        - "infrastructure.terraform_resources[].attributes"
+      criteria: pool size times maximum replicas is below the instance connection limit.

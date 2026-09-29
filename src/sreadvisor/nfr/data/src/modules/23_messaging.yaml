@@ -1,0 +1,107 @@
+id: event_driven_messaging
+title: Event-driven and messaging platforms
+layer: tech_stack
+category: integration
+description: Broker-agnostic requirements for event-driven services and messaging platforms (Kafka, RabbitMQ, ActiveMQ, JMS, Pulsar, cloud queues and topics).
+extends: [baseline]
+detect:
+  - entry_point: [messaging, event]
+  - flow_dependency: messaging
+  - dependency: "kafka|rabbit|amqp|activemq|artemis|jms|pulsar|sqs|sns|servicebus|eventhub|pubsub|nats|celery|kombu|masstransit|bullmq"
+recognizes:
+  - dependency: "kafka|rabbit|amqp|activemq|artemis|jms|pulsar|sqs|sns|servicebus|eventhub|pubsub|nats|celery|kombu|masstransit|bullmq"
+catalogue_refs: [oneagent_default, application_level]
+entries:
+  - id: EDA-001
+    title: Idempotent consumers
+    extends: BASE-RETRY-002
+    requirement: Message handlers tolerate duplicate and redelivered messages (at-least-once delivery) without repeating side effects.
+    best_practice: Deduplicate on a message id or business key in the same transaction as the side effect; design operations to be naturally idempotent.
+    audit_requirement: Processed message ids are retained for the deduplication window.
+    priority: high
+    monitoring:
+      - source: custom_instrumentation
+        signal: "duplicate messages skipped"
+      - source: library_emitted
+        signal: "redelivery count"
+    verification:
+      sources: [stage1_dataset, manual_review]
+      stage1_paths:
+        - "repositories[].entry_points[].kind"
+        - "repositories[].transaction_flows[].steps[].action"
+      criteria: Each messaging entry point shows an idempotency mechanism or idempotent effect.
+  - id: EDA-002
+    title: Dead-letter handling for poison messages
+    requirement: Messages that fail repeatedly are moved to a dead-letter queue or topic after bounded retries, with the failure reason and original metadata, instead of blocking the partition or queue or being dropped.
+    best_practice: Retry with backoff first; route to DLQ with headers describing the error; alert on DLQ depth; provide a replay tool with an owner and process.
+    audit_requirement: Dead-lettered messages are retained and their handling is recorded.
+    priority: critical
+    monitoring:
+      - source: library_emitted
+        signal: "dead-letter publish counter"
+      - source: platform
+        signal: "DLQ depth and age of oldest message"
+    verification:
+      sources: [stage1_dataset, manual_review]
+      stage1_paths:
+        - "repositories[].reliability_patterns[].pattern"
+        - "repositories[].reliability_patterns[].mechanism"
+        - "repositories[].entry_points[].kind"
+      criteria: Each messaging entry point has a dead-letter or discard-with-record policy.
+  - id: EDA-003
+    title: Ordering, partitioning and concurrency chosen deliberately
+    requirement: Where ordering matters, messages carry a key that routes related events to the same partition or queue consumer, and consumer concurrency does not exceed what ordering allows.
+    best_practice: Key by aggregate id; document ordering guarantees; avoid parallelism inside a partition unless order is not needed.
+    audit_requirement: null
+    priority: medium
+    monitoring:
+      - source: library_emitted
+        signal: "per-partition or per-queue lag"
+    verification:
+      sources: [manual_review]
+      criteria: Message keys and concurrency settings are consistent with ordering needs.
+  - id: EDA-004
+    title: Backlog and age monitoring with alerts
+    extends: BASE-MON-002
+    requirement: Queue depth or consumer lag and the age of the oldest unprocessed message are monitored with alerts tied to the processing SLO.
+    best_practice: Alert on age (time to process) rather than raw depth; track per consumer group or subscription.
+    audit_requirement: null
+    priority: high
+    monitoring:
+      - source: library_emitted
+        signal: "consumer lag and records consumed rate"
+        detail: "client library metrics, not OneAgent defaults"
+      - source: platform
+        signal: "broker-side lag and queue depth"
+    verification:
+      sources: [stage1_dataset, runtime_telemetry]
+      stage1_paths:
+        - "repositories[].telemetry.libraries[].kind"
+        - "repositories[].telemetry.libraries[].documented_metrics"
+      criteria: A telemetry library emitting consumer lag or queue depth is present and exported.
+  - id: EDA-005
+    title: Versioned, compatible message schemas
+    requirement: Event payloads have a schema (Avro, Protobuf or JSON Schema) registered and evolved with compatibility checks, so producers and consumers deploy independently.
+    best_practice: Use a schema registry with backward or full compatibility; include a version field; ignore unknown fields in consumers.
+    audit_requirement: Schema change history retained.
+    priority: medium
+    monitoring:
+      - source: library_emitted
+        signal: "deserialization error count"
+    verification:
+      sources: [manual_review, stage1_dataset]
+      stage1_paths:
+        - "repositories[].fingerprint.dependencies[].name"
+      criteria: A schema registry client or schema files exist.
+  - id: EDA-006
+    title: Reliable publication (outbox) for database plus message changes
+    requirement: A state change and its event are published atomically (transactional outbox or change data capture), not with a dual write.
+    best_practice: Write the event to an outbox table in the same transaction and relay it; or use CDC; make relays idempotent.
+    audit_requirement: null
+    priority: medium
+    monitoring:
+      - source: custom_instrumentation
+        signal: "outbox backlog and publication delay"
+    verification:
+      sources: [manual_review]
+      criteria: Flows that write to a database and publish an event use an outbox or equivalent.

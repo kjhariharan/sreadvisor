@@ -1,0 +1,85 @@
+id: source_github
+title: GitHub source control and Actions
+layer: tech_stack
+category: source_control
+description: Requirements for repositories hosted on GitHub, including GitHub Actions workflows.
+extends: [baseline]
+detect:
+  - infra: github_actions
+recognizes: []
+catalogue_refs: [oneagent_default, application_level]
+entries:
+  - id: GH-001
+    title: Protected default branch with required review and checks
+    requirement: "The default and release branches are protected: pull request required, at least one approving review (code owners for sensitive paths), required status checks, no force pushes or deletions."
+    best_practice: Use CODEOWNERS; require branches to be up to date; require signed commits where policy demands.
+    audit_requirement: Branch protection settings and bypass events are retained in the audit log.
+    priority: high
+    monitoring:
+      - source: platform
+        signal: "GitHub audit log events for branch protection changes and bypasses"
+    verification:
+      sources: [manual_review, stage1_dataset]
+      stage1_paths:
+        - "infrastructure.pipelines[].system"
+        - "infrastructure.pipelines[].file"
+      criteria: Branch protection is enabled on the default branch (repository settings) and a CI workflow provides the required checks.
+  - id: GH-002
+    title: Secret scanning and push protection enabled
+    extends: SEC-001
+    requirement: Secret scanning and push protection are enabled so credentials cannot be committed, and dependency alerts (Dependabot or equivalent) are enabled and triaged.
+    best_practice: Enable code scanning and dependency review on pull requests; block on high-severity findings.
+    audit_requirement: Alert triage history retained.
+    priority: high
+    monitoring:
+      - source: platform
+        signal: "open secret scanning and dependency alerts by age"
+    verification:
+      sources: [manual_review, stage1_dataset]
+      stage1_paths:
+        - "repositories[].secrets.hardcoded[].kind"
+      criteria: Repository security features are enabled and no committed secrets remain.
+  - id: GH-003
+    title: Least-privilege workflow permissions and pinned actions
+    requirement: Workflows set explicit minimal permissions (read-only contents by default), third-party actions are pinned to a commit SHA, and untrusted pull request input is never executed with secrets.
+    best_practice: Set permissions at workflow or job level; avoid pull_request_target with checkout of untrusted code; review action updates.
+    audit_requirement: null
+    priority: high
+    monitoring:
+      - source: platform
+        signal: "workflow runs by trigger and permission scope"
+    verification:
+      sources: [manual_review, stage1_dataset]
+      stage1_paths:
+        - "infrastructure.pipelines[].file"
+        - "infrastructure.pipelines[].deploy_steps"
+      criteria: Workflow files declare permissions and pin actions by SHA.
+  - id: GH-004
+    title: Deployments use environments and short-lived cloud credentials
+    extends: DEP-006
+    requirement: Production deployment jobs use GitHub environments with required reviewers, and authenticate to the cloud through OIDC federation instead of long-lived stored credentials.
+    best_practice: Restrict environment secrets to the deploy job; use deployment protection rules; record the deployed commit.
+    audit_requirement: Deployment approvals are retained.
+    priority: medium
+    monitoring:
+      - source: platform
+        signal: "deployment history per environment"
+    verification:
+      sources: [stage1_dataset, manual_review]
+      stage1_paths:
+        - "infrastructure.pipelines[].deploys"
+        - "infrastructure.pipelines[].deploy_steps"
+        - "infrastructure.pipelines[].rollback.mode"
+      criteria: Deploying workflows reference an environment and use OIDC.
+  - id: GH-005
+    title: Build reproducibility and artifact provenance
+    requirement: Builds are reproducible from a commit, artifacts are versioned and traceable (SBOM, provenance attestation), and the same artifact is promoted through environments.
+    best_practice: Generate an SBOM and provenance in CI; sign images; store artifacts in a registry with retention rules.
+    audit_requirement: SBOM and provenance retained per release.
+    priority: medium
+    monitoring:
+      - source: platform
+        signal: "attestation and signature verification results at deploy time"
+    verification:
+      sources: [manual_review]
+      criteria: Provenance or SBOM steps exist in the pipeline.

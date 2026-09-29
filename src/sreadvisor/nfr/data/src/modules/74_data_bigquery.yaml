@@ -1,0 +1,95 @@
+id: data_bigquery
+title: BigQuery
+layer: tech_stack
+category: data
+description: Requirements for services that read or write Google BigQuery (analytics stores and data pipelines).
+extends: [baseline]
+detect:
+  - dependency: "bigquery"
+  - terraform: "google_bigquery"
+recognizes: []
+catalogue_refs: [oneagent_default, application_level]
+entry_extensions:
+  bigquery_feature: "the BigQuery feature, quota or setting involved"
+entries:
+  - id: BQ-001
+    title: Query cost and quota guardrails
+    requirement: Queries set maximum bytes billed, tables are partitioned and clustered with require-partition-filter where large, and project or user quotas and slot reservations are sized and monitored.
+    best_practice: Use dry runs in CI; label jobs by service; set custom quotas per user or project; avoid SELECT * on wide tables.
+    audit_requirement: Query costs are attributed to the owning service through labels.
+    priority: high
+    bigquery_feature: maximumBytesBilled, partitioning, reservations
+    monitoring:
+      - source: platform
+        signal: "bytes processed and slot usage from INFORMATION_SCHEMA jobs views"
+    verification:
+      sources: [manual_review, stage1_dataset]
+      stage1_paths:
+        - "infrastructure.terraform_resources[].type"
+        - "infrastructure.terraform_resources[].attributes"
+      criteria: Query jobs set maximum bytes billed and large tables are partitioned.
+  - id: BQ-002
+    title: Job timeouts, retries and idempotent job identifiers
+    extends: BASE-RETRY-001
+    requirement: Query and load jobs set explicit timeouts, retry transient errors with backoff, and use deterministic job ids so a retried load or insert is not applied twice.
+    best_practice: Poll long jobs asynchronously; use insertId or the Storage Write API with exactly-once semantics for streaming; handle quota errors with backoff.
+    audit_requirement: null
+    priority: high
+    bigquery_feature: job ids, Storage Write API
+    monitoring:
+      - source: platform
+        signal: "job failure and retry counts by error reason"
+      - source: oneagent_default
+        signal: "outbound call response time and failure rate to bigquery.googleapis.com"
+    verification:
+      sources: [stage1_dataset, manual_review]
+      stage1_paths:
+        - "repositories[].reliability_patterns[].pattern"
+        - "repositories[].transaction_flows[].dependencies[].name"
+      criteria: BigQuery calls have timeouts, bounded retries and idempotency.
+  - id: BQ-003
+    title: Least-privilege IAM and customer-managed keys where required
+    extends: ENC-001
+    requirement: Datasets grant roles to service accounts at the narrowest scope (dataset or table, authorised views for shared data), and datasets with sensitive data use customer-managed encryption keys where policy requires.
+    best_practice: Separate read and write identities; avoid project-wide Data Editor; use column-level security for sensitive columns.
+    audit_requirement: Data Access audit logs enabled for BigQuery and retained.
+    priority: high
+    bigquery_feature: IAM, CMEK, authorised views, column-level security
+    monitoring:
+      - source: platform
+        signal: "Cloud Audit Logs data access events for BigQuery"
+    verification:
+      sources: [stage1_dataset, manual_review]
+      stage1_paths:
+        - "infrastructure.terraform_resources[].type"
+        - "infrastructure.terraform_resources[].attributes"
+        - "infrastructure.encryption_audit.facts[].status"
+      criteria: Dataset IAM bindings are narrow and CMEK is set where required.
+  - id: BQ-004
+    title: Table expiration, retention and recoverability
+    requirement: Datasets and tables have explicit expiration and retention, time travel and fail-safe windows are understood, and critical tables have snapshots or exports for recovery.
+    best_practice: Set default table expiration for scratch datasets; use table snapshots for critical data; document the recovery procedure.
+    audit_requirement: Retention settings evidenced per dataset.
+    priority: medium
+    bigquery_feature: default_table_expiration_ms, time travel window, table snapshots
+    monitoring:
+      - source: platform
+        signal: "storage by dataset and snapshot age"
+    verification:
+      sources: [stage1_dataset, manual_review]
+      stage1_paths:
+        - "infrastructure.terraform_resources[].attributes"
+      criteria: Retention and snapshot settings are declared.
+  - id: BQ-005
+    title: Pipeline freshness and failure monitoring
+    requirement: Data pipelines that load BigQuery have freshness and volume monitors (last successful load, row counts) with alerts, so silent staleness is detected.
+    best_practice: Emit a freshness metric per table; alert when data is older than the agreed SLO; verify row counts and schema on load.
+    audit_requirement: null
+    priority: medium
+    bigquery_feature: INFORMATION_SCHEMA, scheduled queries
+    monitoring:
+      - source: custom_instrumentation
+        signal: "data freshness and load success per table"
+    verification:
+      sources: [manual_review]
+      criteria: Freshness SLOs and alerts exist per critical table.
